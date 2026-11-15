@@ -1,11 +1,5 @@
 name: ios-probe
 
-# 回答一个只能用 macOS 回答的问题：上游 Horizon（156 万行 Rust）在 iOS 目标上
-# 到底哪些 crate 编不过。Windows 上做不了 —— libmimalloc-sys 的 build script 要
-# clang/xcrun，而这台机器没有 iPhoneOS SDK。
-#
-# 只手动触发：见 workflow_dispatch。
-
 on:
   workflow_dispatch:
 
@@ -26,12 +20,6 @@ jobs:
         with:
           targets: aarch64-apple-ios
 
-      # 顺序很重要：Cache 会按 `workspaces: upstream-horizon -> target` 去恢复/创建
-      # upstream-horizon/ 目录，如果它跑在 clone 之前，git clone 就会撞上
-      # "fatal: destination path 'upstream-horizon' already exists and is not an empty directory."
-      # 之前两次 0–1 秒的 exit 128 就是这个，跟网络无关。
-      # 钉住 commit：上游 main 一小时能走好几个版本，撞上它自己的坏提交（b396fcf 的 `Trip`
-      # 少一个 `consume` 字段）不该算我们的失败。0de8932 是四个补丁的验证基线。
       - name: Clone upstream Horizon
         env:
           UPSTREAM_REF: 0de893227f0dc4ad7bbbedee37744e007df04151
@@ -45,14 +33,11 @@ jobs:
             git init -q upstream-horizon
             git -C upstream-horizon remote add origin "$URL"
             if git -C upstream-horizon fetch -q --depth 1 --filter=blob:none --no-tags origin "$UPSTREAM_REF" 2> clone.err; then
-              # tools/ 必须在内：horizon-client 的 build.rs 要读 tools/native-hook-fragments，
-              # 缺了它 build script 直接 panic：generating native mod API: No such file or directory。
               git -C upstream-horizon sparse-checkout init --cone
               git -C upstream-horizon sparse-checkout set crates third_party packaging docs/parity xtask tools
               git -C upstream-horizon checkout -q FETCH_HEAD
               break
             fi
-            # annotation 是匿名可读的：失败时能直接看到 git 的原话，不用登录翻日志。
             echo "::warning::clone attempt $attempt failed: $(tr '\n' ' ' < clone.err | cut -c1-400)"
             sleep 15
           done
@@ -63,8 +48,6 @@ jobs:
           echo "commit: $(git -C upstream-horizon rev-parse --short HEAD)"
           du -sh upstream-horizon
 
-      # 注意 `git -C upstream-horizon` 会先切目录，补丁路径必须给绝对路径 ——
-      # 相对路径会被解析成 upstream-horizon/patches/…，然后 exit 128: can't open patch。
       - name: Apply local patches
         run: |
           set -e
@@ -78,14 +61,12 @@ jobs:
             fi
           done
 
-      # 必须排在 clone 之后（见上面的说明）。
       - name: Cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: upstream-horizon -> target
           key: ios-probe
 
-      # 逐个 crate 单独 check：前一个失败不挡住后一个，能一次拿到完整的地图。
       - name: Probe crates for aarch64-apple-ios
         working-directory: upstream-horizon
         continue-on-error: true

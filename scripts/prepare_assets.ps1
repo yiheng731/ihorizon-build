@@ -1,9 +1,3 @@
-# Desktop side of plan B, Windows flavour. Same job as prepare_assets.sh.
-#
-#   $env:HORIZON_REPO = "C:\src\horizon"
-#   .\scripts\prepare_assets.ps1 -ServerJar "$HOME\Downloads\server.jar"
-#
-# Needs: Rust 1.90+, Python 3.11+, JDK 25, and the Horizon checkout.
 [CmdletBinding()]
 param(
     [string]$ServerJar = "$HOME\Downloads\server.jar",

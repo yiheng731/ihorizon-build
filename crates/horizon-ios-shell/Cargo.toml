@@ -10,7 +10,6 @@ name = "horizon_ios_shell"
 crate-type = ["staticlib", "rlib"]
 
 [dependencies]
-# 必须与 crates/horizon-client/Cargo.toml 里的 wgpu 版本保持一致。
 wgpu = { version = "30.0.1", default-features = false, features = [
     "std",
     "metal",
@@ -19,5 +18,4 @@ wgpu = { version = "30.0.1", default-features = false, features = [
 ] }
 
 [features]
-# 打开后由真实 Horizon 客户端接管渲染；默认只画一个清屏三角形，用来证明 Metal 通路。
 horizon = []

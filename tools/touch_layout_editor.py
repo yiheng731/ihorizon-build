@@ -20,18 +20,15 @@ from tkinter import ttk
 
 try:
     from PIL import Image, ImageTk
-except ImportError:  # the window still works, it just draws boxes
+except ImportError:
     Image = None
     ImageTk = None
 
-# The screen the preview stands for: an iPhone 11/XR-class 6.1" panel, which is what the
-# client reports as 1792x828 physical / 598x276 GUI units at scale 3.
 PHYSICAL = (1792, 828)
 GUI = (598, 276)
 
 BUTTONS = ["jump", "sneak", "attack", "place", "inventory", "chat", "pause"]
 
-# What the game blits for each control. `place` is the mod's "use" sprite.
 SPRITE = {
     "jump": "jump",
     "sneak": "sneak",
@@ -68,10 +65,7 @@ DEFAULT = {
 
 OUT = HERE / "touch_layout.json"
 
-# A screenshot from the phone, drawn behind the controls so they can be placed against the
-# real world. Dropped in by hand; the window works without it.
 BACKGROUND = HERE / "background.jpg"
-
 
 class Sprites:
     """Loads the mod's PNGs once and hands out copies sized for the canvas."""
@@ -108,7 +102,6 @@ class Sprites:
         self.cache[key] = photo
         return photo
 
-
 class Editor:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
@@ -123,7 +116,7 @@ class Editor:
                 print(f"ignoring {OUT.name}: {error}", file=sys.stderr)
 
         self.ratio = (self.data["knob_size"] / self.data["stick_size"]) if self.data["stick_size"] else 0.4667
-        self.scale = 0.5  # canvas pixels per physical pixel
+        self.scale = 0.5
         self.canvas_w = int(PHYSICAL[0] * self.scale)
         self.canvas_h = int(PHYSICAL[1] * self.scale)
         self.sprites = Sprites()
@@ -189,7 +182,6 @@ class Editor:
             length=110,
             command=lambda _v, v=var, n=name: self.sized(n, v),
         ).pack(side=tk.LEFT, padx=(2, 4))
-        # A number you can type, showing what the control actually is right now.
         spin = ttk.Spinbox(
             parent, from_=low, to=high, width=5, textvariable=var,
             command=lambda v=var, n=name: self.sized(n, v),
@@ -207,7 +199,6 @@ class Editor:
         except (tk.TclError, ValueError):
             return
         if name == "button" and self.picked:
-            # The slider sizes the picked button alone; the others keep their own side.
             self.data.setdefault("buttons_size", {})[self.picked] = value
             self.note.config(text=f"{self.picked} {value} units · {self.px_of(value):.0f} px here · others unchanged")
         elif name in ("stick", "knob") and self.linked.get():
@@ -260,7 +251,6 @@ class Editor:
         knob = min(max(knob, 16), 160)
         self.data["stick_size"] = pad
         self.data["knob_size"] = knob
-        # Writing the variables back must not count as another edit.
         self.adjusting = True
         try:
             self.stick.set(pad)
@@ -280,7 +270,6 @@ class Editor:
     def px_of(self, gui_units: float) -> float:
         return self.side_px(gui_units)
 
-    # geometry -------------------------------------------------------------
     def px(self, share: list[float]) -> tuple[float, float]:
         x, y = share
         return x * PHYSICAL[0] * self.scale, y * PHYSICAL[1] * self.scale
@@ -309,12 +298,9 @@ class Editor:
         height = self.side_px(22)
         return cx - half, cy - height, cx + half, cy
 
-    # drawing --------------------------------------------------------------
     def draw(self) -> None:
         c = self.canvas
         c.delete("all")
-        # A screenshot from the phone when there is one, so the controls are placed against
-        # the world they will sit on; a stand-in sky and ground otherwise.
         shot = self.sprites.backdrop(self.canvas_w, self.canvas_h)
         if shot is None:
             horizon = self.canvas_h * 0.55
@@ -375,7 +361,6 @@ class Editor:
                 text="no sprite for: " + ", ".join(sorted(self.sprites.missing)),
             )
 
-    # events ---------------------------------------------------------------
     def hit(self, x: float, y: float) -> str | None:
         for name in BUTTONS:
             x0, y0, x1, y1 = self.rect_of(name)
@@ -430,7 +415,6 @@ class Editor:
             self.note.config(text=f"saved {OUT.name}")
         print(json.dumps(self.data, indent=2))
 
-
 def selftest() -> int:
     """No window: round-trip a copy, so the format is checkable without touching the real file."""
     probe = OUT.with_name("touch_layout.selftest.json")
@@ -445,7 +429,6 @@ def selftest() -> int:
     print(f"ok: selftest with {len(back['buttons'])} buttons, {found} sprites found in {TEXTURES}")
     return 0 if found == 9 else int(bool(sys.stderr.write(f"some sprites are missing under {TEXTURES}\n")))
 
-
 def main() -> int:
     if "--selftest" in sys.argv:
         return selftest()
@@ -453,7 +436,6 @@ def main() -> int:
     Editor(root)
     root.mainloop()
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

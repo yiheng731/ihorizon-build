@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Assemble an ipa from a built Horizon.app, or — on a machine without Xcode —
 from the bundle *layout* only, so the packaging step is verifiable anywhere.
 
@@ -31,7 +30,6 @@ BUILD_SETTINGS = {
     "TARGET_NAME": "Horizon",
 }
 
-
 def substitute(value):
     """Resolve $(VAR) exactly like Xcode's Info.plist preprocessing."""
     if isinstance(value, str):
@@ -46,7 +44,6 @@ def substitute(value):
         return [substitute(item) for item in value]
     return value
 
-
 def build_preview(destination: Path) -> None:
     app = destination / "Payload" / "Horizon.app"
     if app.parent.parent.exists():
@@ -59,7 +56,6 @@ def build_preview(destination: Path) -> None:
         plistlib.dump(info, handle, fmt=plistlib.FMT_BINARY)
 
     (app / "PkgInfo").write_bytes(b"APPL????")
-    # Marker instead of a Mach-O: this build is a layout fixture, not a binary.
     (app / "PREVIEW-ONLY.txt").write_text(
         "This ipa contains no executable. Build the real one with\n"
         "  bash scripts/build_ipa.sh            (macOS / CI)\n",
@@ -67,7 +63,6 @@ def build_preview(destination: Path) -> None:
     )
     print(f"  bundle  {app}")
     print(f"  id      {info['CFBundleIdentifier']}  v{info['CFBundleShortVersionString']}")
-
 
 def package(source_root: Path, out: Path) -> None:
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +75,6 @@ def package(source_root: Path, out: Path) -> None:
             archive.write(path, path.relative_to(source_root).as_posix())
     print(f"  ipa     {out}  ({out.stat().st_size / 1024:.0f} KiB)")
 
-    # Round-trip check: the archive must be readable and contain Payload/…app/Info.plist.
     with zipfile.ZipFile(out) as archive:
         bad = archive.testzip()
         if bad:
@@ -90,7 +84,6 @@ def package(source_root: Path, out: Path) -> None:
     if expected not in names:
         raise SystemExit(f"ipa 缺少 {expected}；实际内容：{names[:5]}")
     print(f"  check   {len(names)} entries, {expected} present")
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -118,7 +111,6 @@ def main() -> int:
     package(staging, args.out)
     shutil.rmtree(staging, ignore_errors=True)
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

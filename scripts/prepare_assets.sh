@@ -1,13 +1,4 @@
 #!/usr/bin/env bash
-# Desktop side of plan B: turn the player's own Minecraft 26.3 into the
-# horizon-assets.zip that the iOS app imports on first launch.
-#
-# Needs: Rust 1.90+, Python 3.11+, JDK 25, and the Horizon checkout.
-#
-#   HORIZON_REPO=~/src/horizon ./scripts/prepare_assets.sh ~/Downloads/server.jar
-#
-# Nothing Mojang-made is downloaded by this script or by the app: it reads the
-# jar/Minecraft installation you already own.
 set -euo pipefail
 
 SERVER_JAR="${1:-$HOME/Downloads/server.jar}"
@@ -43,7 +34,6 @@ fi
 
 step "打包"
 rm -f "$OUT"
-# 越小越好：iOS 端一次性解压，压缩比直接决定传输和导入时间。
 (cd .local && zip -qr9 "$OUT" assets data MANIFEST.txt)
 echo "    $(ls -lh "$OUT" | awk '{print $5}')  $OUT"
 

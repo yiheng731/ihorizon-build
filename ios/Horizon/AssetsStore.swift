@@ -1,23 +1,10 @@
 import Foundation
 
-/// The one place that knows where game data lives inside the iOS container.
-///
-/// There is no `~/.minecraft` in an app sandbox, and no JDK to run
-/// `horizon-prepare` on the device. So the data arrives as a directory the
-/// player picks once (or as a zip this class unpacks), and everything under
-/// `Application Support/horizon` is what the desktop `--prepare` step produced:
-///
-///   Application Support/horizon/assets/   textures, sounds, languages, fonts
-///   Application Support/horizon/data/     recipes, loot tables, tags, dimensions
-///
-/// Plan B (small ipa): these two directories are *not* in the bundle; the player
-/// imports them on first launch. Plan A (fat ipa) would put them in
-/// `Bundle.main.resourceURL` and this class would point there instead.
 final class AssetsStore {
     static let shared = AssetsStore()
 
-    /// `…/Library/Application Support/horizon` — survives app updates, excluded
-    /// from iCloud backup because it is re-importable.
+    
+    
     let root: URL
 
     private init() {
@@ -30,8 +17,8 @@ final class AssetsStore {
         try? mutable.setResourceValues(values)
     }
 
-    /// 0 = ready, 1 = root missing, 2 = assets/ missing, 3 = data/ missing.
-    /// Delegated to Rust so Swift and the game can never disagree.
+    
+    
     var state: Int32 {
         root.path.withCString { hz_assets_state($0) }
     }
@@ -40,8 +27,8 @@ final class AssetsStore {
 
     var isEmpty: Bool { state != 0 }
 
-    /// Installs a player-picked folder or zip. Both paths end in the same shape:
-    /// `root/assets` and `root/data` exist and are non-empty.
+    
+    
     func install(from picked: URL) throws {
         let scoped = picked.startAccessingSecurityScopedResource()
         defer { if scoped { picked.stopAccessingSecurityScopedResource() } }
@@ -57,8 +44,8 @@ final class AssetsStore {
         }
     }
 
-    /// Copies assets/ and data/ out of the picked folder, whether the player
-    /// picked the `.local` directory itself or one wrapping it.
+    
+    
     private func flatten(_ picked: URL) throws {
         let fm = FileManager.default
         guard let inner = Self.findPayloadRoot(picked) else {
@@ -75,8 +62,8 @@ final class AssetsStore {
         }
     }
 
-    /// A prepared tree may be `<picked>/assets`, `<picked>/.local/assets`, or
-    /// `<picked>/horizon/assets` depending on how the player zipped it.
+    
+    
     private static func findPayloadRoot(_ url: URL, depth: Int = 0) -> URL? {
         guard depth < 4 else { return nil }
         let fm = FileManager.default
@@ -96,8 +83,8 @@ final class AssetsStore {
     private func unzip(_ archive: URL) throws {
         let zip = try ZipArchive(url: archive)
         let fm = FileManager.default
-        // Unpack into a scratch directory first: a half-extracted tree must never
-        // look "ready" to the gate screen.
+        
+        
         let scratch = root.appendingPathComponent(".incoming", isDirectory: true)
         if fm.fileExists(atPath: scratch.path) { try fm.removeItem(at: scratch) }
         try fm.createDirectory(at: scratch, withIntermediateDirectories: true)

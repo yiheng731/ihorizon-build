@@ -1,12 +1,6 @@
 import UIKit
 import UniformTypeIdentifiers
 
-/// Plan B's first screen: the ipa ships without Mojang's assets, so the player
-/// brings their own. One pick, one copy, then the game.
-///
-/// The desktop side of this is `scripts/prepare_assets.ps1|sh`, which runs
-/// `horizon-prepare` against the player's own 26.3 `server.jar` and writes
-/// `horizon-assets.zip`. Nothing Mojang-made is redistributed by this app.
 final class ImportViewController: UIViewController, UIDocumentPickerDelegate {
     var onReady: (() -> Void)?
 
@@ -94,11 +88,11 @@ final class ImportViewController: UIViewController, UIDocumentPickerDelegate {
         }
     }
 
-    // MARK: - picking
+    
 
     @objc private func pickFolder() {
-        // asCopy 必须为 false：给 .folder 传 true，iOS 会直接抛异常闪退。
-        // 安全作用域访问已经在 AssetsStore.install 里用 startAccessingSecurityScopedResource 处理了。
+        
+        
         let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder], asCopy: false)
         picker.delegate = self
         picker.allowsMultipleSelection = false
@@ -121,7 +115,7 @@ final class ImportViewController: UIViewController, UIDocumentPickerDelegate {
         statusLabel.text = "状态：已取消"
     }
 
-    // MARK: - install
+    
 
     private func install(from url: URL) {
         setBusy(true, message: "状态：正在导入…（1GB 级数据可能要一两分钟）")

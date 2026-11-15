@@ -1,8 +1,5 @@
 import UIKit
 
-/// The whole app is one window, one view controller. UIKit owns the view and the
-/// display link; Rust owns the GPU work. There is no `winit` here on purpose:
-/// its UIKit backend would fight us for the event loop and give nothing back.
 @main
 final class AppDelegate: UIResponder, UIApplicationDelegate {
     var window: UIWindow?
@@ -20,8 +17,8 @@ final class AppDelegate: UIResponder, UIApplicationDelegate {
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // TODO(port): ask the game to flush the world before iOS suspends us.
-        // jetsam kills suspended games without warning; a lost chunk is a lost base.
+        
+        
         NotificationCenter.default.post(name: .horizonWillSuspend, object: nil)
     }
 }
@@ -30,7 +27,6 @@ extension Notification.Name {
     static let horizonWillSuspend = Notification.Name("HorizonWillSuspend")
 }
 
-/// Shows the import screen until assets are in place, then swaps in the game.
 final class RootViewController: UIViewController {
     private var game: GameViewController?
 

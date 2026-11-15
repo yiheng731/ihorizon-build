@@ -1,12 +1,6 @@
 import Compression
 import Foundation
 
-/// Minimal, dependency-free ZIP reader: enough for the `horizon-assets.zip` that
-/// `scripts/prepare_assets` produces (stored + deflate, no encryption, no zip64).
-///
-/// iOS has no `/usr/bin/unzip` and `Foundation` still has no archive API, so the
-/// choice is a 30 MB Swift library or these 180 lines. Deflate comes from
-/// `libcompression`, which is part of the system.
 struct ZipEntry {
     let name: String
     let method: UInt16
@@ -47,7 +41,7 @@ final class ZipArchive {
         guard data.count > 22 else { throw ZipError.tooSmall }
     }
 
-    // MARK: little-endian reads
+    
 
     private func u16(_ offset: Int) -> UInt16 {
         data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt16.self) }
@@ -57,7 +51,7 @@ final class ZipArchive {
         data.withUnsafeBytes { $0.loadUnaligned(fromByteOffset: offset, as: UInt32.self) }
     }
 
-    // MARK: directory
+    
 
     func entries() throws -> [ZipEntry] {
         let eocd = try endOfCentralDirectory()
@@ -106,7 +100,7 @@ final class ZipArchive {
     }
 
     private func endOfCentralDirectory() throws -> Int {
-        // The record is 22 bytes plus a comment of up to 64 KiB.
+        
         let lowerBound = max(0, data.count - 22 - 65_535)
         var offset = data.count - 22
         while offset >= lowerBound {
@@ -118,7 +112,7 @@ final class ZipArchive {
         throw ZipError.noEndOfCentralDirectory
     }
 
-    // MARK: extraction
+    
 
     func extract(to destination: URL) throws {
         let fm = FileManager.default
@@ -159,8 +153,8 @@ final class ZipArchive {
         }
     }
 
-    /// `COMPRESSION_ZLIB` in Apple's `Compression` framework is raw DEFLATE —
-    /// which is exactly what ZIP method 8 stores (no zlib header, no gzip wrapper).
+    
+    
     private func inflate(_ input: Data, expectedSize: Int, name: String) throws -> Data {
         guard expectedSize > 0 else { return Data() }
         var output = Data(count: expectedSize)
@@ -181,8 +175,8 @@ final class ZipArchive {
         return output
     }
 
-    /// Refuses absolute paths, drive letters and `..`, so an archive can never
-    /// write outside the container.
+    
+    
     private func safePath(_ name: String, under root: URL) throws -> URL {
         guard !name.hasPrefix("/"), !name.contains(".."), !name.contains(":") else {
             throw ZipError.unsafePath(name)

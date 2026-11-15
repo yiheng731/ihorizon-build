@@ -1,17 +1,14 @@
 import QuartzCore
 import UIKit
 
-/// Drives the frame pump. `CADisplayLink` is the only clock: on a ProMotion
-/// device it fires at 120 Hz when the system allows it, and iOS throttles it for
-/// us when the app is occluded or the device is thermal-throttled.
 final class GameViewController: UIViewController {
     private var shell: UnsafeMutableRawPointer?
     private var link: CADisplayLink?
     private var lastTimestamp: CFTimeInterval = 0
     private var reportedError: String?
 
-    /// Proof of life: frames per second plus which adapter wgpu actually picked.
-    /// Without it a frozen image and a 120 Hz image look identical.
+    
+    
     private let hud = UILabel()
     private var hudTimer: Timer?
     private var lastSampleCount: UInt64 = 0
@@ -64,8 +61,8 @@ final class GameViewController: UIViewController {
         link = nil
         hudTimer?.invalidate()
         hudTimer = nil
-        // TODO(port): hz_pause() / world save. Dropping frames is not enough once
-        // the game owns a world.
+        
+        
     }
 
     override func viewDidLayoutSubviews() {
@@ -76,7 +73,7 @@ final class GameViewController: UIViewController {
         hz_resize(shell, UInt32(size.width), UInt32(size.height))
     }
 
-    // MARK: - shell
+    
 
     private func createShellIfNeeded() {
         guard shell == nil, view.window != nil else { return }
@@ -104,7 +101,7 @@ final class GameViewController: UIViewController {
         return message.isEmpty ? "未知错误" : message
     }
 
-    /// One alert, not one per failed frame.
+    
     private func reportOnce(_ message: String) {
         guard reportedError == nil else { return }
         reportedError = message
@@ -117,12 +114,12 @@ final class GameViewController: UIViewController {
         present(alert, animated: true)
     }
 
-    // MARK: - frame loop
+    
 
     private func startDisplayLink() {
         guard link == nil else { return }
         let link = CADisplayLink(target: self, selector: #selector(step))
-        // Ask for 120 Hz when the panel has it; the system may still pick 60.
+        
         if #available(iOS 15.0, *) {
             link.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 120, preferred: 120)
         }
@@ -143,8 +140,8 @@ final class GameViewController: UIViewController {
         hz_frame(shell, Float(min(dt, 0.1)))
     }
 
-    /// Samples `hz_frame_count` twice a second: (frames delta / time delta) is
-    /// the real presented rate, independent of what CADisplayLink asked for.
+    
+    
     private func startHUD() {
         guard hudTimer == nil else { return }
         let timer = Timer(timeInterval: 0.5, repeats: true) { [weak self] _ in
@@ -178,6 +175,6 @@ final class GameViewController: UIViewController {
     }
 
     @objc private func willSuspend() {
-        // TODO(port): flush the world, then let the system suspend us.
+        
     }
 }

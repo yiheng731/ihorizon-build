@@ -22,14 +22,13 @@ OUT = HERE / "icon-horizon-1024.png"
 SIZE = 1024
 SS = 3
 CANVAS = SIZE * SS
-UNIT = CANVAS / 1024.0  # authored coordinates are in 1024 units
+UNIT = CANVAS / 1024.0
 
 VIOLET = (162, 92, 255)
 VIOLET_DEEP = (112, 44, 200)
 MAGENTA = (208, 130, 255)
 CORE = (252, 240, 255)
 RIM = (32, 6, 58)
-
 
 def bezier(p0, p1, p2, p3, steps=110):
     out = []
@@ -41,12 +40,10 @@ def bezier(p0, p1, p2, p3, steps=110):
         out.append((x, y))
     return out
 
-
 def stroke(draw, points, width_at):
     for i, (x, y) in enumerate(points):
         r = max(width_at(i / max(len(points) - 1, 1)) * 0.5, 0.6)
         draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
-
 
 def nib(entry: float, peak: float, exit_: float, scale: float):
     """Width in 1024 units: `entry` at the start, `peak` at the waist, `exit_` at the end."""
@@ -62,14 +59,11 @@ def nib(entry: float, peak: float, exit_: float, scale: float):
 
     return at
 
-
 def build(scale: float):
     """The glyph at supersampled size; `scale` shrinks every stroke for the core."""
     layer = Image.new("L", (CANVAS, CANVAS), 0)
     draw = ImageDraw.Draw(layer)
 
-    # The glyph is drawn about its own centre and grown a little, so it still
-    # reads at 60 px on a home screen.
     grow = 1.16
     cx0, cy0 = 500.0, 500.0
 
@@ -89,7 +83,6 @@ def build(scale: float):
     draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=255)
     return layer
 
-
 def coloured(mask: Image.Image, top, bottom):
     w, h = mask.size
     grad = Image.new("RGBA", (w, h))
@@ -108,7 +101,6 @@ def coloured(mask: Image.Image, top, bottom):
     out.putalpha(mask)
     return out
 
-
 def main() -> int:
     base = Image.open(BASE).convert("RGBA").resize((SIZE, SIZE), Image.LANCZOS)
     out = Image.alpha_composite(base, Image.new("RGBA", (SIZE, SIZE), (38, 10, 66, 92)))
@@ -122,8 +114,6 @@ def main() -> int:
     rim = body.filter(ImageFilter.MaxFilter(13)).filter(ImageFilter.GaussianBlur(6))
     out.alpha_composite(coloured(rim.point(lambda v: int(v * 0.85)), RIM, RIM))
 
-    # A thin edge light on the tube: the letter keeps a violet body with a
-    # bright lip, which is what makes the neon read at icon size.
     edge = body.filter(ImageFilter.GaussianBlur(2))
     out.alpha_composite(coloured(edge.point(lambda v: int(v * 0.55)), MAGENTA, VIOLET))
     out.alpha_composite(coloured(body, VIOLET, VIOLET_DEEP))
@@ -136,7 +126,6 @@ def main() -> int:
     out.resize((180, 180), Image.LANCZOS).save(HERE / "icon-horizon-180.png")
     print("wrote", OUT)
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

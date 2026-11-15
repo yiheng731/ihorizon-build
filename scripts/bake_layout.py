@@ -18,11 +18,9 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 SOURCE = Path("crates/horizon-client-render/src/touch_hud.rs")
-# Where the patched upstream tree lives while a build is prepared.
-TREES = [Path("/tmp/hz-14"), Path("C:/Users/hh201/AppData/Local/Temp/hz-14")]
+TREES = []
 
 EMPTY = 'pub const BAKED: &str = "";'
-
 
 def target() -> Path:
     for tree in TREES:
@@ -30,7 +28,6 @@ def target() -> Path:
         if candidate.exists():
             return candidate
     raise SystemExit(f"no patched tree with {SOURCE} found; looked in {[str(t) for t in TREES]}")
-
 
 def main(argv: list[str]) -> int:
     path = target()
@@ -41,7 +38,6 @@ def main(argv: list[str]) -> int:
         if len(argv) < 2:
             return int(bool(sys.stderr.write(__doc__ or "")))
         layout = json.loads(Path(argv[1]).read_text(encoding="utf-8"))
-        # A baked layout never starts in the editor or with the ruler on.
         layout["edit"] = False
         layout["debug"] = False
         if "buttons" not in layout or not layout["buttons"]:
@@ -68,7 +64,6 @@ def main(argv: list[str]) -> int:
     print(f"{note}: {path}")
     print("now regenerate patches/0014 and rebuild")
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv))

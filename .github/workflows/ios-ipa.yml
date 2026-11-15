@@ -61,17 +61,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Horizon's own client — the real game, not the green-triangle shell. No Xcode: the crate is a
-  # bin (ios/crates/horizon-client-ios) whose `main` starts horizon-client's entry, winit's iOS
-  # backend calls UIApplicationMain, and the .app around it is written by a python script.
   client:
     name: build client ipa (macos-15)
     runs-on: macos-15
     timeout-minutes: 180
-    # Apple Silicon (arm64), three cores. The upstream release profile is `lto = "thin"` +
-    # `codegen-units = 1`; 0.1.10 built with both overridden and was the first build whose
-    # renderer frame fit: thin LTO inlines enough into it to blow a 128 MiB stack. Until the
-    # renderer is split properly these two stay overridden.
     env:
       CARGO_PROFILE_RELEASE_LTO: "false"
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
@@ -83,12 +76,6 @@ jobs:
         with:
           targets: aarch64-apple-ios
 
-      # Pinned on purpose: main moves several times an hour and a broken main is not our bug
-      # (b396fcf ships `Trip` without its `consume` field, for one). 0de8932 is the commit the
-      # four patches were written and verified against — bump this when the patches move.
-      #
-      # tools/ carries tools/native-hook-fragments, which horizon-client's build.rs reads: without
-      # it the build script panics with "generating native mod API: No such file or directory".
       - name: Clone upstream Horizon
         env:
           UPSTREAM_REF: 0de893227f0dc4ad7bbbedee37744e007df04151
@@ -134,8 +121,6 @@ jobs:
           cp -r ios/crates/horizon-client-ios upstream-horizon/crates/horizon-client-ios
           python3 - <<'PY'
           import pathlib
-          # The crate carries an empty [workspace] table so it can also be checked standalone
-          # inside this repository; a workspace member must not declare one.
           crate = pathlib.Path("upstream-horizon/crates/horizon-client-ios/Cargo.toml")
           text = crate.read_text(encoding="utf-8")
           assert "\n[workspace]\n" in text
@@ -163,8 +148,6 @@ jobs:
         working-directory: upstream-horizon
         run: |
           set -o pipefail
-          # `ios-touch` turns the on-screen controls on: the stick, the look area and the
-          # buttons over the HUD (patches/0014).
           cargo build --release --target aarch64-apple-ios -p horizon-client-ios \
             --features horizon-client/ios-touch 2>&1 | tail -40
           ls -l target/aarch64-apple-ios/release/horizon-client-ios
@@ -183,7 +166,6 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  # Optional: sign with a real certificate. Skipped unless the secrets exist.
   sign:
     name: sign ipa (Ad Hoc)
     needs: ipa

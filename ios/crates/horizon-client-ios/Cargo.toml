@@ -5,18 +5,11 @@ edition = "2024"
 publish = false
 description = "Horizon's own client, started by UIKit instead of a shell: the ipa's executable."
 
-# Standalone: `../horizon-client` only exists after CI copies this folder into upstream, so this
-# crate must not be pulled into the shell repository's own workspace above it.
 [workspace]
 
-# CI copies this folder to upstream-horizon/crates/horizon-client-ios/, so the path below is an
-# upstream sibling — which is why this crate is not a dependency of my own repository.
 [dependencies]
 horizon-client = { path = "../horizon-client" }
-# Unpacking the player's prepared files (`src/main.rs`), the same zip the client already uses.
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
-# `UIScreen`'s own idea of the screen, logged next to what winit reports (`log_screen`). Only
-# iOS has UIKit, and `objc2` refuses to compile anywhere but an Apple target.
 [target.'cfg(target_os = "ios")'.dependencies]
 objc2 = { version = "0.6", default-features = false, features = ["std"] }
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["CFCGTypes", "objc2"] }

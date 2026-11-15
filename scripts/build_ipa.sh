@@ -1,12 +1,4 @@
 #!/usr/bin/env bash
-# Build Horizon.ipa for iOS (unsigned by default).
-#
-# Runs on macOS with Xcode + xcodegen, or verbatim on a GitHub Actions
-# macos-15 runner (.github/workflows/ios-ipa.yml).
-#
-#   ./scripts/build_ipa.sh                # unsigned ipa
-#   SIGN_IDENTITY="Apple Development: you@x" ./scripts/build_ipa.sh
-#   ZSIGN_CERT=cert.p12 ZSIGN_PASSWORD=x ZSIGN_PROFILE=app.mobileprovision ./scripts/build_ipa.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -63,7 +55,6 @@ mkdir -p "$BUILD/Payload"
 cp -R "$APP" "$BUILD/Payload/Horizon.app"
 cd "$BUILD"
 rm -f Horizon-unsigned.ipa
-# -y 保留符号链接（Frameworks 里的 framework 版本链接），-q 安静，-r 递归。
 zip -qry Horizon-unsigned.ipa Payload
 IPA="$BUILD/Horizon-unsigned.ipa"
 echo "    $(ls -lh "$IPA" | awk '{print $5}')  $IPA"

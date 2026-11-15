@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Pack Horizon's own iOS executable into an unsigned .ipa.
 
 No Xcode, no xcodebuild, no codesign: an .ipa is a zip holding `Payload/<Name>.app/` with a
@@ -24,9 +23,7 @@ from pathlib import Path
 
 BUNDLE_NAME = "ihorizon"
 BUNDLE_ID = "dev.horizon.client"
-# Bumped per build so a phone can be told which one it runs: iOS shows this in Settings and the
-# crash report's bundleInfo, and "0.1.0" appearing there means the oldest client build.
-VERSION = "0.1.31"
+VERSION = "1.0"
 MINIMUM_OS = "15.0"
 EXECUTABLE_NAME = "ihorizon"
 
@@ -40,8 +37,6 @@ INFO_PLIST = {
     "CFBundlePackageType": "APPL",
     "CFBundleShortVersionString": VERSION,
     "CFBundleVersion": VERSION,
-    # Files shows the app's Documents folder: the player drops the prepared zip there and the
-    # first launch that finds one unpacks it (ios/.../horizon-client-ios/src/main.rs).
     "UIFileSharingEnabled": True,
     "LSSupportsOpeningDocumentsInPlace": True,
     "CFBundleDocumentTypes": [
@@ -53,10 +48,8 @@ INFO_PLIST = {
     ],
     "LSRequiresIPhoneOS": True,
     "MinimumOSVersion": MINIMUM_OS,
-    # wgpu needs Metal; arm64 only, so an Intel simulator cannot claim it.
     "UIRequiredDeviceCapabilities": ["metal", "arm64"],
     "UIDeviceFamily": [1, 2],
-    # Without a launch screen iOS letterboxes the app and reports a 320x480 surface.
     "UILaunchScreen": {"UIColorName": ""},
     "UIApplicationSupportsIndirectInputEvents": True,
     "UISupportedInterfaceOrientations": [
@@ -73,8 +66,6 @@ INFO_PLIST = {
     "UIRequiresFullScreen": True,
     "CFBundleSupportedPlatforms": ["iPhoneOS"],
     "DTSDKName": "iphoneos",
-    # Flat icon files at the bundle root: iOS picks these up from CFBundleIconFiles without
-    # an asset catalogue, which is what lets this script build the .app without Xcode.
     "CFBundleIcons": {
         "CFBundlePrimaryIcon": {
             "CFBundleIconFiles": ["AppIcon60x60"],
@@ -89,7 +80,6 @@ INFO_PLIST = {
     },
 }
 
-# (file name in the bundle, pixels) — the sizes iOS asks for on a phone and an iPad.
 ICONS = {
     "AppIcon60x60@2x.png": 120,
     "AppIcon60x60@3x.png": 180,
@@ -98,11 +88,7 @@ ICONS = {
     "AppIcon1024.png": 1024,
 }
 ICON_SOURCE = Path(__file__).resolve().parent.parent / "art" / "icon-horizon-1024.png"
-# The sizes are checked in under ios/icons: the macOS runner has no Pillow, so resizing
-# there is not an option — the files are copied, and only a missing set falls back to
-# resizing locally or shipping the 1024 alone.
 ICON_DIR = Path(__file__).resolve().parent.parent / "ios" / "icons"
-
 
 def write_icons(app: Path) -> bool:
     """Copy the drawn icon into the bundle at every size the system may ask for."""
@@ -116,14 +102,12 @@ def write_icons(app: Path) -> bool:
     try:
         from PIL import Image
     except ImportError:
-        # No Pillow: ship the 1024 only, which still gives Files and Settings something.
         shutil.copy2(ICON_SOURCE, app / "AppIcon1024.png")
         return True
     source = Image.open(ICON_SOURCE).convert("RGBA")
     for name, size in ICONS.items():
         source.resize((size, size), Image.LANCZOS).save(app / name)
     return True
-
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -168,7 +152,6 @@ def main() -> int:
     if not args.keep:
         shutil.rmtree(app.parent, ignore_errors=True)
     return 0
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

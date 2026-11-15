@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """一键：建仓库 → 推代码 → 触发 GitHub Actions → 等 macOS 构建 → 下载 ipa。
 
 只用标准库，Windows / macOS / Linux 都能跑。
@@ -32,28 +31,20 @@ ROOT = Path(__file__).resolve().parent
 API = "https://api.github.com"
 API_VERSION = "2022-11-28"
 ARTIFACT = "ihorizon-ipa"
-# 同一个 workflow 的第二个 job：把 Horizon 自己的客户端（不是绿色三角壳）打成 ipa
 CLIENT_ARTIFACT = "ihorizon-client-ipa"
 WORKFLOW = "ios-ipa.yml"
-# 探针 workflow：只有 macOS 能回答「上游哪些 crate 在 iOS 上编不过」
 PROBE_WORKFLOW = "ios-probe.yml"
 PROBE_ARTIFACT = "ios-probe-log"
 POLL_SECONDS = 15
 
-
-# ─────────────────────────── 输出 ───────────────────────────
-
 def log(message: str) -> None:
     print(message, flush=True)
-
 
 def step(message: str) -> None:
     print(f"\n\033[1;32m==> {message}\033[0m", flush=True)
 
-
 def warn(message: str) -> None:
     print(f"\033[1;33m  ! {message}\033[0m", flush=True)
-
 
 def die(message: str, hint: str = "") -> "None":
     print(f"\n\033[1;31m✗ {message}\033[0m", flush=True)
@@ -61,15 +52,9 @@ def die(message: str, hint: str = "") -> "None":
         print(f"  {hint}", flush=True)
     sys.exit(1)
 
-
-# ─────────────────────────── 进程 ───────────────────────────
-
-GIT = "git"  # find_git() 会把它换成绝对路径
-
+GIT = "git"
 
 def find_git(interactive: bool = True) -> str:
-    """git 不一定在 PATH 里：Windows 上常见于 Program Files、scoop、choco，
-    甚至只存在于某些工具链自带的 ucrt64/bin。都找不到就当场装一个。"""
     global GIT
 
     found = shutil.which("git")
@@ -83,8 +68,6 @@ def find_git(interactive: bool = True) -> str:
         Path(os.environ.get("LOCALAPPDATA", "")) / "Programs/Git/cmd/git.exe",
         Path(os.environ.get("USERPROFILE", "")) / "scoop/shims/git.exe",
         Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "chocolatey/bin/git.exe",
-        Path(os.environ.get("USERPROFILE", ""))
-        / ".dsh/profiles/desktop/node_modules/@dsh-ops/bash-win32-x64/ucrt64/bin/git.exe",
     ]
     for candidate in candidates:
         if candidate.is_file():
@@ -92,7 +75,6 @@ def find_git(interactive: bool = True) -> str:
             break
 
     if GIT == "git":
-        # 最后一搏：在常见安装根目录里浅扫一层
         for root in (Path(os.environ.get("LOCALAPPDATA", "")) / "Programs",
                      Path(os.environ.get("ProgramFiles", r"C:\Program Files"))):
             if root.is_dir():
@@ -122,12 +104,10 @@ def find_git(interactive: bool = True) -> str:
         if GIT == "git":
             die("装完了但没找到 git.exe", "重开一个终端再跑一次")
 
-    # git 会自己去调 git-remote-https 等子程序，所在目录必须在 PATH 上。
     git_dir = str(Path(GIT).parent)
     if git_dir not in os.environ.get("PATH", ""):
         os.environ["PATH"] = git_dir + os.pathsep + os.environ.get("PATH", "")
     return GIT
-
 
 def run(cmd: list[str], check: bool = True, quiet: bool = False, env: dict | None = None) -> str:
     merged = {
@@ -152,22 +132,16 @@ def run(cmd: list[str], check: bool = True, quiet: bool = False, env: dict | Non
         )
     return result.stdout
 
-
 def git(*args: str, check: bool = True, quiet: bool = False) -> str:
     return run([GIT, "-c", "credential.helper=", *args], check=check, quiet=quiet)
-
 
 def git_value(key: str) -> str:
     out = git("config", "--get", key, check=False, quiet=True)
     return out.strip()
 
-
-# ─────────────────────────── GitHub API ───────────────────────────
-
 class NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
-
 
 def api(method: str, path: str, token: str, payload: dict | None = None) -> dict:
     body = json.dumps(payload).encode() if payload is not None else None
@@ -184,7 +158,6 @@ def api(method: str, path: str, token: str, payload: dict | None = None) -> dict
                 raw = response.read()
                 return json.loads(raw) if raw else {}
         except (http.client.IncompleteRead, TimeoutError, ConnectionError) as error:
-            # A long poll can outlive the connection: ask again, the answer is idempotent.
             if attempt == 3:
                 die("和 GitHub 的连接反复中断", repr(error))
             time.sleep(2 + attempt * 3)
@@ -201,28 +174,21 @@ def api(method: str, path: str, token: str, payload: dict | None = None) -> dict
             time.sleep(2 + attempt * 3)
     raise AssertionError("unreachable")
 
-
 class GitHubError(Exception):
     def __init__(self, code: int, detail: str) -> None:
         super().__init__(f"HTTP {code}")
         self.code = code
         self.detail = detail
 
-
-# ─────────────────────────── 令牌 ───────────────────────────
-
 INVISIBLE = dict.fromkeys(map(ord, "\u200b\u200c\u200d\ufeff\u00a0\r\n\t "), None)
-
 
 def scrub(token: str) -> str:
     """粘进来的令牌常带零宽字符、换行或被包在引号里，全清掉。"""
     return token.translate(INVISIBLE).strip().strip("'\"")
 
-
 def fingerprint(token: str) -> str:
     head = token[:11] if token.startswith("github_pat_") else token[:4]
     return f"长度 {len(token)}，{head}…{token[-4:]}"
-
 
 def check_token(token: str) -> tuple[bool, str]:
     """直接问 /user，不经过 api()：401 不该杀掉重试循环。"""
@@ -238,7 +204,6 @@ def check_token(token: str) -> tuple[bool, str]:
         return False, error.read().decode("utf-8", "replace")[:160]
     except urllib.error.URLError as error:
         die("连不上 api.github.com", str(error.reason))
-
 
 def resolve_token(interactive: bool, explicit: str | None = None) -> str:
     sources: list[tuple[str, str]] = []
@@ -289,12 +254,8 @@ def resolve_token(interactive: bool, explicit: str | None = None) -> str:
             log("    常见原因：复制漏字符 / 已过期 / 已被撤销 / 复制成了别的文字")
             log("    建议：set GITHUB_TOKEN=xxx  再跑一次")
 
-
-# ─────────────────────────── 本地仓库 ───────────────────────────
-
 def ensure_git() -> None:
     find_git(interactive=True)
-
 
 def ensure_repo() -> None:
     inside = run(["git", "rev-parse", "--is-inside-work-tree"], check=False, quiet=True).strip()
@@ -304,7 +265,6 @@ def ensure_repo() -> None:
     branch = git("rev-parse", "--abbrev-ref", "HEAD", check=False, quiet=True).strip()
     if branch not in ("main", ""):
         git("branch", "-M", "main")
-
 
 def ensure_identity(token: str | None) -> None:
     name, email = git_value("user.name"), git_value("user.email")
@@ -326,7 +286,6 @@ def ensure_identity(token: str | None) -> None:
     git("config", "user.email", email)
     log(f"    身份：{name} <{email}>（本仓库局部配置）")
 
-
 def ensure_staged() -> bool:
     git("add", "-A")
     git("add", "--renormalize", ".", check=False)
@@ -336,7 +295,6 @@ def ensure_staged() -> bool:
     count = len(staged.splitlines())
     log(f"    暂存 {count} 个文件")
     return True
-
 
 def commit(staged: bool) -> None:
     head = git("rev-parse", "--verify", "HEAD", check=False, quiet=True).strip()
@@ -351,12 +309,8 @@ def commit(staged: bool) -> None:
     short = git("rev-parse", "--short", "HEAD", quiet=True).strip()
     log(f"    已提交 {short}")
 
-
-# ─────────────────────────── 远端 ───────────────────────────
-
 def whoami(token: str) -> str:
     return api("GET", "/user", token)["login"]
-
 
 def ensure_remote_repo(token: str, owner: str, name: str, private: bool, create: bool) -> tuple[str, str]:
     try:
@@ -385,7 +339,6 @@ def ensure_remote_repo(token: str, owner: str, name: str, private: bool, create:
     log(f"    {repo['full_name']}（{'私有' if private else '公开'}）")
     return repo["owner"]["login"], repo["name"]
 
-
 def ensure_remote(owner: str, name: str) -> None:
     url = f"https://github.com/{owner}/{name}.git"
     current = git("remote", "get-url", "origin", check=False, quiet=True).strip()
@@ -397,10 +350,8 @@ def ensure_remote(owner: str, name: str) -> None:
         git("remote", "add", "origin", url)
         log(f"    origin → {url}")
 
-
 def push(token: str, owner: str, name: str) -> None:
     step("推送 main")
-    # 令牌只出现在这一次命令行里，不写进 .git/config。
     url = f"https://x-access-token:{token}@github.com/{owner}/{name}.git"
     result = subprocess.run(
         [GIT, "-c", "credential.helper=", "push", "-u", url, "HEAD:main"],
@@ -421,9 +372,6 @@ def push(token: str, owner: str, name: str) -> None:
         die("推送失败", output.strip()[:600])
     log("    已推送，workflow 应该已经触发")
 
-
-# ─────────────────────────── Actions ───────────────────────────
-
 def dispatch(token: str, owner: str, name: str, workflow: str = WORKFLOW) -> None:
     step("手动触发 workflow")
     try:
@@ -433,7 +381,6 @@ def dispatch(token: str, owner: str, name: str, workflow: str = WORKFLOW) -> Non
         die(f"触发失败（HTTP {error.code}）", error.detail + "\n  workflow 里有 workflow_dispatch 才能在已推的仓库上重跑")
     log("    已触发")
 
-
 def epoch_of(rfc3339: str) -> float:
     from datetime import datetime, timezone
     try:
@@ -441,23 +388,20 @@ def epoch_of(rfc3339: str) -> float:
     except ValueError:
         return 0.0
 
-
 def find_run(token: str, owner: str, name: str, since: float,
              workflow: str = WORKFLOW) -> dict | None:
     runs = api("GET", f"/repos/{owner}/{name}/actions/runs?per_page=20", token).get("workflow_runs", [])
     mine = [
         r for r in runs
         if r.get("path", "").endswith(workflow)
-        and epoch_of(r.get("created_at", "")) >= since - 120  # 容忍时钟偏差
+        and epoch_of(r.get("created_at", "")) >= since - 120
     ]
     if not mine:
         return None
-    # push 和 dispatch 会各起一次 run，concurrency 会砍掉其中一个：优先没被取消的那个。
     for run_ in mine:
         if run_.get("conclusion") != "cancelled":
             return run_
     return mine[0]
-
 
 def wait_for_run(token: str, owner: str, name: str, timeout: int,
                  workflow: str = WORKFLOW) -> dict:
@@ -481,7 +425,6 @@ def wait_for_run(token: str, owner: str, name: str, timeout: int,
                 if conclusion == "success":
                     return run_
                 if conclusion == "cancelled" and time.time() - started < 180:
-                    # 另一个 run 抢了 concurrency 组；等它出来。
                     log("    这个 run 被 concurrency 取消了，等替代的 run")
                     time.sleep(POLL_SECONDS)
                     continue
@@ -495,7 +438,6 @@ def wait_for_run(token: str, owner: str, name: str, timeout: int,
         time.sleep(POLL_SECONDS)
 
     die("等待超时", f"继续看：{seen.get('html_url') if seen else f'https://github.com/{owner}/{name}/actions'}")
-
 
 def download_artifact(token: str, owner: str, name: str, run_id: int, dest_dir: Path,
                       artifact: str = ARTIFACT, required: bool = True) -> Path | None:
@@ -512,7 +454,6 @@ def download_artifact(token: str, owner: str, name: str, run_id: int, dest_dir: 
     dest_dir.mkdir(parents=True, exist_ok=True)
     zip_path = dest_dir / f"{artifact}.zip"
 
-    # 第一步要令牌，重定向到签名 URL 后必须去掉 Authorization，否则 401。
     opener = urllib.request.build_opener(NoRedirect)
     request = urllib.request.Request(f"{API}/repos/{owner}/{name}/actions/artifacts/{target['id']}/zip")
     request.add_header("Accept", "application/vnd.github+json")
@@ -535,16 +476,12 @@ def download_artifact(token: str, owner: str, name: str, run_id: int, dest_dir: 
     with zipfile.ZipFile(zip_path) as archive:
         archive.extractall(dest_dir)
     if artifact != ARTIFACT:
-        # 探针产物就是一份日志，不是 ipa。
         logs = sorted(dest_dir.glob("*.log"))
         return logs[0] if logs else zip_path
     ipas = sorted(dest_dir.glob("*.ipa"))
     if not ipas:
         die("压缩包里没有 .ipa", f"内容：{[p.name for p in dest_dir.iterdir()]}")
     return ipas[0]
-
-
-# ─────────────────────────── 主流程 ───────────────────────────
 
 def main() -> int:
     if hasattr(sys.stdout, "reconfigure"):
@@ -596,7 +533,6 @@ def main() -> int:
     if args.probe:
         owner = git_value("remote.origin.url").rstrip("/").split("/")[-2]
         name = git_value("remote.origin.url").rstrip("/").split("/")[-1].removesuffix(".git")
-        # 关键：workflow 本身也在仓库里，改动不推上去，dispatch 跑的还是旧的 yml。
         step("推送当前改动")
         staged = ensure_staged()
         commit(staged)
@@ -616,7 +552,6 @@ def main() -> int:
         staged = ensure_staged()
         commit(staged)
         push(token, owner, name)
-        # 推送本身就会触发 workflow；再 dispatch 会多起一个 run，互相取消。
         time.sleep(8)
         try:
             already = find_run(token, owner, name, time.time() - 300)
@@ -658,7 +593,6 @@ def main() -> int:
     report(ipa, owner, name, client)
     return 0
 
-
 def report_probe(path: Path) -> None:
     print()
     log(f"[1;32m✓ 探针日志：{path}[0m")
@@ -672,7 +606,6 @@ def report_probe(path: Path) -> None:
             log(f"  {'OK  ' if verdict == 'ok' else 'FAIL'} {crate}")
     print()
     log("这份日志里 grep '^error' 就是完整的阻塞清单。")
-
 
 def report(ipa: Path, owner: str, name: str, client: Path | None = None) -> None:
     size = ipa.stat().st_size / 1048576
@@ -689,7 +622,6 @@ def report(ipa: Path, owner: str, name: str, client: Path | None = None) -> None
     log("  2. 抽资源：$env:HORIZON_REPO=...; .\\scripts\\prepare_assets.ps1")
     log("  3. 传 zip 到手机 → 打开 Horizon → 导入 → 开始游戏")
     log(f"  仓库：https://github.com/{owner}/{name}")
-
 
 if __name__ == "__main__":
     try:

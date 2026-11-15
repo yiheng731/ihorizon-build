@@ -1,20 +1,4 @@
-//! iOS host shell for Horizon.
-//!
-//! This crate is the only place in a Horizon iOS port that knows about UIKit.
-//! It owns three things and nothing else:
-//!
-//! 1. a `wgpu` Metal surface created from the `CAMetalLayer` that Swift hands over,
-//! 2. a frame pump the host drives with `CADisplayLink`,
-//! 3. a touch sink that will become the iOS input source of Horizon's `Action` layer.
-//!
-//! With the default (stub) build it clears the drawable and draws one triangle,
-//! which is exactly enough to prove "wgpu + Metal + CAMetalLayer works on this
-//! device". With `--features horizon` the same surface is handed to the real
-//! client instead (see `port::attach`, the file that the port proper fills in).
-//!
-//! No `winit`. winit's UIKit backend would fight us for the event loop, the
-//! window and the display link, and Horizon needs none of that: UIKit owns the
-//! view, this crate owns the GPU work.
+
 
 #![deny(clippy::undocumented_unsafe_blocks)]
 
@@ -23,10 +7,8 @@ use std::ffi::CStr;
 use std::path::Path;
 use std::sync::{Mutex, OnceLock};
 
-/// Touch phases, mirrored in `include/horizon_ios_shell.h`.
 const TOUCH_BEGAN: u32 = 0;
 
-/// A live shell. One per process; iOS games are single-view by nature.
 pub struct Shell {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -37,13 +19,9 @@ pub struct Shell {
     frames: u64,
     last_dt: f32,
     touches: Vec<(u32, u32, f32, f32)>,
-    /// "Apple M2 / Metal" — shown in the HUD so you can tell which backend ran.
+    
     adapter: std::ffi::CString,
 }
-
-// ---------------------------------------------------------------------------
-// error reporting
-// ---------------------------------------------------------------------------
 
 static LAST_ERROR: OnceLock<Mutex<String>> = OnceLock::new();
 
@@ -59,12 +37,10 @@ fn set_error(message: impl Into<String>) {
     }
 }
 
-/// Last failure, for Swift to surface in the import screen instead of a silent
-/// black window.
 #[unsafe(no_mangle)]
 pub extern "C" fn hz_last_error() -> *const c_char {
-    // The string is owned by the mutex; leaking a CString per call would grow
-    // forever, so keep one buffer alive per process.
+    
+    
     static BUFFER: OnceLock<Mutex<std::ffi::CString>> = OnceLock::new();
     let text = last_error_slot()
         .lock()
@@ -75,10 +51,6 @@ pub extern "C" fn hz_last_error() -> *const c_char {
     *guard = std::ffi::CString::new(text).unwrap_or_default();
     guard.as_ptr()
 }
-
-// ---------------------------------------------------------------------------
-// a 25-line executor (avoids a pollster dependency)
-// ---------------------------------------------------------------------------
 
 fn block_on<F: Future>(future: F) -> F::Output {
     use std::sync::Arc;
@@ -105,14 +77,6 @@ fn block_on<F: Future>(future: F) -> F::Output {
     }
 }
 
-// ---------------------------------------------------------------------------
-// creation
-// ---------------------------------------------------------------------------
-
-/// Creates the renderer on a `CAMetalLayer`.
-///
-/// # Safety
-/// `layer` must be a live `CAMetalLayer*` that outlives the returned shell.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_create(
     layer: *mut c_void,
@@ -138,7 +102,7 @@ pub unsafe extern "C" fn hz_create(
         display: None,
     });
 
-    // SAFETY: the caller guarantees the layer is live for the shell's lifetime.
+    
     let surface = match unsafe {
         instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(layer))
     } {
@@ -177,8 +141,8 @@ pub unsafe extern "C" fn hz_create(
         }
     };
 
-    // get_default_config already picks a supported format/alpha mode and the
-    // sRGB-neutral `Auto` colour space; we only pin present mode and size.
+    
+    
     let Some(mut config) = surface.get_default_config(&adapter, width, height) else {
         set_error("surface has no default configuration");
         return std::ptr::null_mut();
@@ -214,8 +178,6 @@ pub unsafe extern "C" fn hz_create(
     Box::into_raw(shell)
 }
 
-/// A clear plus one triangle. Replace with Horizon's real renderer once
-/// `--features horizon` is wired (see `ATTACHING.md`).
 fn build_probe_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("horizon-ios probe"),
@@ -273,33 +235,20 @@ fn fs_main() -> @location(0) vec4<f32> {
     })
 }
 
-/// Which adapter actually got picked ("Apple M2 / Metal"). Borrowed, valid for
-/// the life of the shell.
-///
-/// # Safety
-/// `shell` must be a live handle from `hz_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_adapter_info(shell: *mut Shell) -> *const c_char {
     unsafe { shell.as_ref() }.map_or(std::ptr::null(), |s| s.adapter.as_ptr())
 }
 
-/// # Safety
-/// `shell` must come from `hz_create` and not have been destroyed.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_destroy(shell: *mut Shell) {
     if shell.is_null() {
         return;
     }
-    // SAFETY: caller contract above.
+    
     drop(unsafe { Box::from_raw(shell) });
 }
 
-// ---------------------------------------------------------------------------
-// frame pump
-// ---------------------------------------------------------------------------
-
-/// # Safety
-/// `shell` must be a live handle from `hz_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_resize(shell: *mut Shell, width: u32, height: u32) {
     let Some(shell) = (unsafe { shell.as_mut() }) else {
@@ -314,8 +263,6 @@ pub unsafe extern "C" fn hz_resize(shell: *mut Shell, width: u32, height: u32) {
     shell.surface.configure(&shell.device, &shell.config);
 }
 
-/// # Safety
-/// `shell` must be a live handle from `hz_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_frame(shell: *mut Shell, dt: f32) {
     let Some(shell) = (unsafe { shell.as_mut() }) else {
@@ -327,11 +274,11 @@ pub unsafe extern "C" fn hz_frame(shell: *mut Shell, dt: f32) {
     let frame = match shell.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(frame) => frame,
         wgpu::CurrentSurfaceTexture::Suboptimal(frame) => {
-            // Still drawable; reconfigure after this frame so the next one is exact.
+            
             shell.surface.configure(&shell.device, &shell.config);
             frame
         }
-        // Drawable size changed under us (rotation, split view, first frame).
+        
         wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
             shell.surface.configure(&shell.device, &shell.config);
             return;
@@ -359,8 +306,8 @@ pub unsafe extern "C" fn hz_frame(shell: *mut Shell, dt: f32) {
                 resolve_target: None,
                 depth_slice: None,
                 ops: wgpu::Operations {
-                    // The probe triangle never moves, so a still frame proves
-                    // nothing about the pump. Breathing the clear colour does.
+                    
+                    
                     load: wgpu::LoadOp::Clear({
                         let pulse = (shell.frames as f64 * 0.03).sin() * 0.5 + 0.5;
                         wgpu::Color {
@@ -382,38 +329,20 @@ pub unsafe extern "C" fn hz_frame(shell: *mut Shell, dt: f32) {
         pass.draw(0..3, 0..1);
     }
     shell.queue.submit(Some(encoder.finish()));
-    // wgpu 30 moved presentation from SurfaceTexture::present to Queue::present.
+    
     shell.queue.present(frame);
 }
 
-/// # Safety
-/// `shell` must be a live handle from `hz_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_frame_count(shell: *mut Shell) -> u64 {
     unsafe { shell.as_ref() }.map_or(0, |s| s.frames)
 }
 
-/// # Safety
-/// `shell` must be a live handle from `hz_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_scale(shell: *mut Shell) -> f32 {
     unsafe { shell.as_ref() }.map_or(1.0, |s| s.scale)
 }
 
-// ---------------------------------------------------------------------------
-// touch sink
-// ---------------------------------------------------------------------------
-
-/// Forwards one touch in pixels.
-///
-/// This is the seam for the real input work: keep collecting points here, then
-/// translate them into Horizon's `Action` layer. Horizon already routes every
-/// input through `crates/horizon-client-input/src/actions.rs`, where game code
-/// only ever asks `held(action)` — so touch becomes a first-class input source
-/// without touching gameplay.
-///
-/// # Safety
-/// `shell` must be a live handle from `hz_create`.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_touch(shell: *mut Shell, id: u32, phase: u32, x: f32, y: f32) {
     let Some(shell) = (unsafe { shell.as_mut() }) else {
@@ -426,22 +355,13 @@ pub unsafe extern "C" fn hz_touch(shell: *mut Shell, id: u32, phase: u32, x: f32
     }
 }
 
-// ---------------------------------------------------------------------------
-// assets
-// ---------------------------------------------------------------------------
-
-/// Points the game at the extracted asset root. Returns true when both
-/// `assets/` and `data/` are present under it.
-///
-/// # Safety
-/// `utf8_path` must be a valid NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_set_assets_root(utf8_path: *const c_char) -> bool {
     if utf8_path.is_null() {
         set_error("hz_set_assets_root: null path");
         return false;
     }
-    // SAFETY: caller contract above.
+    
     let path = unsafe { CStr::from_ptr(utf8_path) }
         .to_string_lossy()
         .into_owned();
@@ -460,9 +380,6 @@ pub unsafe extern "C" fn hz_set_assets_root(utf8_path: *const c_char) -> bool {
 
 static ASSETS_ROOT: OnceLock<Mutex<Option<String>>> = OnceLock::new();
 
-/// The asset root Swift handed over, or an empty string. The real client reads
-/// its root from here instead of `~/.minecraft` (there is no home directory in
-/// an iOS sandbox).
 #[unsafe(no_mangle)]
 pub extern "C" fn hz_assets_root() -> *const c_char {
     static BUFFER: OnceLock<Mutex<std::ffi::CString>> = OnceLock::new();
@@ -476,14 +393,12 @@ pub extern "C" fn hz_assets_root() -> *const c_char {
     guard.as_ptr()
 }
 
-/// # Safety
-/// `utf8_path` must be a valid NUL-terminated UTF-8 string.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hz_assets_state(utf8_path: *const c_char) -> i32 {
     if utf8_path.is_null() {
         return 1;
     }
-    // SAFETY: caller contract above.
+    
     let path = unsafe { CStr::from_ptr(utf8_path) }
         .to_string_lossy()
         .into_owned();

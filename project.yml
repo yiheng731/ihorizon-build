@@ -1,8 +1,3 @@
-# XcodeGen spec. `xcodegen generate` produces Horizon.xcodeproj.
-#
-# Why a spec instead of a checked-in .pbxproj: the Rust static library path, the
-# bridging header and the linker flags are the parts that actually break, and
-# they are three readable lines here instead of three opaque GUID blocks.
 name: Horizon
 
 options:
@@ -18,7 +13,6 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "15.0"
     ENABLE_USER_SCRIPT_SANDBOXING: NO
     CLANG_ENABLE_MODULES: YES
-    # Rust release build of libhorizon_ios_shell.a (see scripts/build_ipa.sh).
     LIBRARY_SEARCH_PATHS: $(SRCROOT)/target/aarch64-apple-ios/release
     HEADER_SEARCH_PATHS: $(SRCROOT)/crates/horizon-ios-shell/include
     OTHER_LDFLAGS:
@@ -40,7 +34,6 @@ settings:
       - -framework
       - CoreVideo
       - -lz
-    # Rust static lib is fat-free: one arch per build.
     ARCHS: arm64
     ONLY_ACTIVE_ARCH: NO
     VALIDATE_WORKSPACE: NO
