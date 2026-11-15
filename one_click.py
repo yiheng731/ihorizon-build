@@ -278,7 +278,7 @@ def ensure_identity(token: str | None) -> None:
         name = name or me.get("name") or login
         email = email or f"{uid}+{login}@users.noreply.github.com"
     else:
-        name = name or "ihorizon-build"
+        name = name or "ihorizon"
         email = email or "ihorizon@users.noreply.github.com"
         warn("没有令牌，提交身份用占位值")
 
@@ -492,7 +492,7 @@ def main() -> int:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--name", default="ihorizon-build", help="仓库名（默认 ihorizon-build）")
+    parser.add_argument("--name", default="ihorizon", help="仓库名（默认 ihorizon-build）")
     parser.add_argument("--private", action="store_true", help="建私有仓库（macOS 分钟 10 倍计费）")
     parser.add_argument("--no-create", action="store_true", help="仓库要自己先建好")
     parser.add_argument("--no-wait", action="store_true", help="推完就走，不等构建")
