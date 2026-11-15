@@ -1,0 +1,239 @@
+name: ios-ipa
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/horizon-ios-shell/**"
+      - "ios/**"
+      - "patches/**"
+      - "project.yml"
+      - "scripts/**"
+      - ".github/workflows/ios-ipa.yml"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ios-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ipa:
+    name: build ipa (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust + iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-shell
+
+      - name: xcodegen
+        run: brew install xcodegen
+
+      - name: Show toolchain
+        run: |
+          xcodebuild -version
+          rustc -V
+          xcodegen --version
+
+      - name: Build ipa
+        run: bash scripts/build_ipa.sh
+
+      - name: Inspect bundle
+        run: |
+          unzip -l build/Horizon-unsigned.ipa | head -40
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
+            build/Payload/Horizon.app/Info.plist
+          lipo -info build/Payload/Horizon.app/Horizon || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ihorizon-ipa
+          path: build/*.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  # Horizon's own client — the real game, not the green-triangle shell. No Xcode: the crate is a
+  # bin (ios/crates/horizon-client-ios) whose `main` starts horizon-client's entry, winit's iOS
+  # backend calls UIApplicationMain, and the .app around it is written by a python script.
+  client:
+    name: build client ipa (macos-15)
+    runs-on: macos-15
+    timeout-minutes: 180
+    # Apple Silicon (arm64), three cores. The upstream release profile is `lto = "thin"` +
+    # `codegen-units = 1`; 0.1.10 built with both overridden and was the first build whose
+    # renderer frame fit: thin LTO inlines enough into it to blow a 128 MiB stack. Until the
+    # renderer is split properly these two stay overridden.
+    env:
+      CARGO_PROFILE_RELEASE_LTO: "false"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust + iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios
+
+      # Pinned on purpose: main moves several times an hour and a broken main is not our bug
+      # (b396fcf ships `Trip` without its `consume` field, for one). 0de8932 is the commit the
+      # four patches were written and verified against — bump this when the patches move.
+      #
+      # tools/ carries tools/native-hook-fragments, which horizon-client's build.rs reads: without
+      # it the build script panics with "generating native mod API: No such file or directory".
+      - name: Clone upstream Horizon
+        env:
+          UPSTREAM_REF: 0de893227f0dc4ad7bbbedee37744e007df04151
+        run: |
+          set -u
+          export GIT_TERMINAL_PROMPT=0
+          export GIT_ASKPASS=/bin/true
+          URL="https://x-access-token:${{ github.token }}@github.com/horizon-rust/horizon.git"
+          for attempt in 1 2 3; do
+            rm -rf upstream-horizon
+            git init -q upstream-horizon
+            git -C upstream-horizon remote add origin "$URL"
+            if git -C upstream-horizon fetch -q --depth 1 --filter=blob:none --no-tags \
+                 origin "$UPSTREAM_REF" 2> clone.err; then
+              git -C upstream-horizon sparse-checkout init --cone
+              git -C upstream-horizon sparse-checkout set \
+                crates third_party packaging docs/parity xtask tools
+              git -C upstream-horizon checkout -q FETCH_HEAD
+              break
+            fi
+            echo "::warning::clone attempt $attempt failed: $(tr '\n' ' ' < clone.err | cut -c1-400)"
+            sleep 15
+          done
+          if [ ! -d upstream-horizon/crates ] || [ ! -f upstream-horizon/Cargo.toml ]; then
+            echo "::error::upstream clone failed: $(tr '\n' ' ' < clone.err | cut -c1-400)"
+            exit 1
+          fi
+          echo "commit: $(git -C upstream-horizon rev-parse --short HEAD)"
+
+      - name: Apply patches
+        run: |
+          set -e
+          shopt -s nullglob
+          for p in patches/*.patch; do
+            abs="$GITHUB_WORKSPACE/$p"
+            git -C upstream-horizon apply "$abs"
+            echo "applied $(basename "$p")"
+          done
+
+      - name: Add the iOS crate to the workspace
+        run: |
+          set -e
+          cp -r ios/crates/horizon-client-ios upstream-horizon/crates/horizon-client-ios
+          python3 - <<'PY'
+          import pathlib
+          # The crate carries an empty [workspace] table so it can also be checked standalone
+          # inside this repository; a workspace member must not declare one.
+          crate = pathlib.Path("upstream-horizon/crates/horizon-client-ios/Cargo.toml")
+          text = crate.read_text(encoding="utf-8")
+          assert "\n[workspace]\n" in text
+          crate.write_text(text.replace("\n[workspace]\n", "\n", 1), encoding="utf-8")
+
+          manifest = pathlib.Path("upstream-horizon/Cargo.toml")
+          root = manifest.read_text(encoding="utf-8")
+          member = '    "crates/horizon-client-ios",\n'
+          assert member not in root
+          head, sep, rest = root.partition("members = [\n")
+          assert sep, "members list changed shape"
+          manifest.write_text(head + sep + member + rest, encoding="utf-8")
+          print("member added")
+          PY
+          grep -n "horizon-client-ios" upstream-horizon/Cargo.toml
+          grep -c "\[workspace\]" upstream-horizon/crates/horizon-client-ios/Cargo.toml || true
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream-horizon -> target
+          key: ios-client
+
+      - name: Build the executable
+        working-directory: upstream-horizon
+        run: |
+          set -o pipefail
+          # `ios-touch` turns the on-screen controls on: the stick, the look area and the
+          # buttons over the HUD (patches/0014).
+          cargo build --release --target aarch64-apple-ios -p horizon-client-ios \
+            --features horizon-client/ios-touch 2>&1 | tail -40
+          ls -l target/aarch64-apple-ios/release/horizon-client-ios
+
+      - name: Assemble the ipa
+        run: |
+          python3 scripts/make_client_ipa.py \
+            --binary upstream-horizon/target/aarch64-apple-ios/release/horizon-client-ios \
+            --out dist/ihorizon-client-unsigned.ipa
+          unzip -l dist/ihorizon-client-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ihorizon-client-ipa
+          path: dist/ihorizon-client-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+  # Optional: sign with a real certificate. Skipped unless the secrets exist.
+  sign:
+    name: sign ipa (Ad Hoc)
+    needs: ipa
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-15
+    timeout-minutes: 20
+    env:
+      P12_BASE64: ${{ secrets.P12_BASE64 }}
+      P12_PASSWORD: ${{ secrets.P12_PASSWORD }}
+      PROFILE_BASE64: ${{ secrets.PROFILE_BASE64 }}
+      TEAM_ID: ${{ secrets.TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ihorizon-ipa
+          path: build
+
+      - name: Bail out when no signing material is configured
+        id: guard
+        run: |
+          if [ -z "$P12_BASE64" ] || [ -z "$PROFILE_BASE64" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "没有配置证书 secrets，跳过签名（ipa 仍是未签名）。"
+          fi
+
+      - name: Import certificate + profile
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          echo "$P12_BASE64" | base64 -d > /tmp/cert.p12
+          security create-keychain -p actions build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p actions build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$P12_PASSWORD" \
+            -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -k actions build.keychain
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "$PROFILE_BASE64" | base64 -d \
+            > ~/Library/MobileDevice/Provisioning\ Profiles/horizon.mobileprovision
+
+      - name: Resign
+        if: steps.guard.outputs.skip != 'true'
+        run: |
+          PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/horizon.mobileprovision"
+          bash scripts/resign_ipa.sh "build/Horizon-unsigned.ipa" "build/Horizon-signed.ipa" \
+            "$TEAM_ID" "$PROFILE_PATH"
+
+      - uses: actions/upload-artifact@v4
+        if: steps.guard.outputs.skip != 'true'
+        with:
+          name: ihorizon-ipa-signed
+          path: build/Horizon-signed.ipa

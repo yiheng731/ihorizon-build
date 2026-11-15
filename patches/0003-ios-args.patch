@@ -1,0 +1,20 @@
+diff --git a/crates/horizon-client/src/entry.rs b/crates/horizon-client/src/entry.rs
+index b2b40f7..aa314d5 100644
+--- a/crates/horizon-client/src/entry.rs
++++ b/crates/horizon-client/src/entry.rs
+@@ -33,7 +33,14 @@ pub fn main_with(mods: crate::mod_api::Mods) {
+     // The text crates ship (`horizon_hooks::lang`), loaded with the game's own languages.
+     horizon_client::lang::install_crate_files(horizon_hooks::lang::engine::all());
+     horizon_client::spans::startup::init(std::time::Instant::now());
+-    let args: Vec<String> = std::env::args().skip(1).collect();
++    // A host with no argv of its own - an app bundle started by UIKit, a window server that
++    // passes a command line as data - hands it over in `HORIZON_ARGS`, arguments separated by
++    // the unit separator so one variable carries spaces and `--home`'s path. Desktop runs have
++    // no such variable and read argv as before.
++    let args: Vec<String> = match std::env::var("HORIZON_ARGS") {
++        Ok(list) if !list.is_empty() => list.split('\u{1f}').map(str::to_owned).collect(),
++        _ => std::env::args().skip(1).collect(),
++    };
+     let game_args = args.iter().take_while(|a| *a != "--dedicated");
+     let help = game_args
+         .clone()

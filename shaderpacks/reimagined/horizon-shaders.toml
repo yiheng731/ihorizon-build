@@ -1,0 +1,123 @@
+schema = 1
+id = "reimagined"
+name = "Reimagined"
+version = "0.1.0"
+api = "0.1"
+description = "Complementary Reimagined's colour science, rewritten for Horizon's own stage API."
+authors = ["Horizon iOS port"]
+shared = ["common.wgsl"]
+
+[sky]
+file = "sky.wgsl"
+name = "Reimagined sky"
+
+[material]
+file = "material.wgsl"
+name = "Reimagined lighting"
+
+[[post]]
+file = "post/bloom.wgsl"
+name = "Bloom"
+
+[[post]]
+file = "post/grade.wgsl"
+name = "Grade and tonemap"
+
+[[options]]
+id = "sky_brightness"
+name = "Sky brightness"
+type = "float"
+default = 1.0
+min = 0.4
+max = 1.8
+step = 0.05
+
+[[options]]
+id = "sunset_strength"
+name = "Sunset glow"
+type = "float"
+default = 1.0
+min = 0.0
+max = 2.0
+step = 0.05
+
+[[options]]
+id = "night_brightness"
+name = "Night sky"
+type = "float"
+default = 1.0
+min = 0.0
+max = 2.5
+step = 0.05
+
+[[options]]
+id = "ambient_tint"
+name = "Ambient tint"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.5
+step = 0.05
+
+[[options]]
+id = "torch_warmth"
+name = "Torch warmth"
+type = "float"
+default = 1.0
+min = 0.0
+max = 1.5
+step = 0.05
+
+[[options]]
+id = "bloom_strength"
+name = "Bloom"
+type = "float"
+default = 0.35
+min = 0.0
+max = 1.5
+step = 0.05
+
+[[options]]
+id = "bloom_threshold"
+name = "Bloom threshold"
+type = "float"
+default = 0.75
+min = 0.2
+max = 2.0
+step = 0.05
+
+[[options]]
+id = "exposure"
+name = "Exposure"
+type = "float"
+default = 1.0
+min = 0.4
+max = 2.0
+step = 0.05
+
+[[options]]
+id = "saturation"
+name = "Saturation"
+type = "float"
+default = 1.05
+min = 0.0
+max = 2.0
+step = 0.05
+
+[[options]]
+id = "contrast"
+name = "Contrast"
+type = "float"
+default = 1.05
+min = 0.6
+max = 1.6
+step = 0.05
+
+[[options]]
+id = "vignette"
+name = "Vignette"
+type = "bool"
+default = true
+
+[budget]
+gpu_ms = 1.5

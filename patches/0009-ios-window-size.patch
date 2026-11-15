@@ -1,0 +1,77 @@
+diff --git a/crates/horizon-client-render/src/gfx.rs b/crates/horizon-client-render/src/gfx.rs
+index cf25de7..312e316 100644
+--- a/crates/horizon-client-render/src/gfx.rs
++++ b/crates/horizon-client-render/src/gfx.rs
+@@ -2596,7 +2596,27 @@ impl Renderer {
+         let info = adapter.get_info();
+         surface_setup::log_sprite_split(&info, split, layers);
+         crate::graphics::suggest_reduced_far_detail(crate::graphics::lod_capped(&info));
+-        let size = window.inner_size();
++        let inner = window.inner_size();
++        let outer = window.outer_size();
++        // iOS: winit reports neither size correctly (`surface_setup::window_size`): the app
++        // measures the screen and passes it in `HORIZON_WINDOW`.
++        let size = surface_setup::window_size(&window);
++        if cfg!(target_os = "ios") {
++            let hud = crate::hud::HudBatch::new([size.width, size.height]);
++            log::info!(
++                "Horizon renderer: window {}x{} (inner {}x{}, outer {}x{}, scale factor {}), GUI {}x{} at scale {}",
++                size.width,
++                size.height,
++                inner.width,
++                inner.height,
++                outer.width,
++                outer.height,
++                window.scale_factor(),
++                hud.width,
++                hud.height,
++                hud.scale
++            );
++        }
+         let max_side = device.limits().max_texture_dimension_2d;
+         let configured = match (&surface, configured) {
+             (Some(_), Some(configured)) => Some(configured),
+diff --git a/crates/horizon-client-render/src/gfx/surface_setup.rs b/crates/horizon-client-render/src/gfx/surface_setup.rs
+index 19bc95e..09d45a9 100644
+--- a/crates/horizon-client-render/src/gfx/surface_setup.rs
++++ b/crates/horizon-client-render/src/gfx/surface_setup.rs
+@@ -65,6 +65,30 @@ pub(super) fn set_up_surface(
+     Ok((config, caps))
+ }
+ /// What `pick_adapter` knows of one of a backend's adapters.
++/// The size a surface is configured at: what the window reports, except on iOS, where winit
++/// reports 16:9 numbers that are not the screen — `inner_size` came back 2368x1398 and
++/// `outer_size` 2560x1440 on an iPhone 11, whose screen is 1792x828. There the app measures
++/// `UIScreen` before it starts the client and passes the answer in `HORIZON_WINDOW`.
++pub(super) fn window_size(window: &winit::window::Window) -> winit::dpi::PhysicalSize<u32> {
++    let reported = window.inner_size();
++    #[cfg(target_os = "ios")]
++    if let Some(size) = from_the_app() {
++        return size;
++    }
++    reported
++}
++
++/// `HORIZON_WINDOW` as `WIDTHxHEIGHT`, or nothing when it is absent or malformed.
++#[cfg(target_os = "ios")]
++fn from_the_app() -> Option<winit::dpi::PhysicalSize<u32>> {
++    let text = std::env::var("HORIZON_WINDOW").ok()?;
++    let (width, height) = text.split_once('x')?;
++    Some(winit::dpi::PhysicalSize::new(
++        width.parse().ok()?,
++        height.parse().ok()?,
++    ))
++}
++
+ #[derive(Clone, Copy, Debug)]
+ pub(super) struct AdapterChoice {
+     pub(super) kind: wgpu::DeviceType,
+@@ -207,7 +231,7 @@ pub(super) async fn open_adapter(
+                 &device,
+                 &device_lost,
+                 caps,
+-                window.inner_size(),
++                window_size(window),
+                 None,
+                 true,
+             )

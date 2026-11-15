@@ -1,0 +1,1530 @@
+diff --git a/crates/horizon-client-render/src/lib.rs b/crates/horizon-client-render/src/lib.rs
+index fd4acea..7e24f16 100644
+--- a/crates/horizon-client-render/src/lib.rs
++++ b/crates/horizon-client-render/src/lib.rs
+@@ -61,6 +61,7 @@ pub mod hdr_calibration;
+ pub mod hud;
+ pub mod hud_kit;
+ pub mod hud_layout;
++pub mod touch_hud;
+ pub mod hud_overlays;
+ pub mod inventory_effects;
+ pub mod java_text;
+diff --git a/crates/horizon-client-render/src/touch_hud.rs b/crates/horizon-client-render/src/touch_hud.rs
+new file mode 100644
+index 0000000..7e59e46
+--- /dev/null
++++ b/crates/horizon-client-render/src/touch_hud.rs
+@@ -0,0 +1,646 @@
++//! The on-screen touch controls of the iOS client: where the stick, the look
++//! area and the buttons sit, the draws for them and the hit test the touch
++//! handler uses.
++//!
++//! Laid out like Bedrock's default touch controls: the stick bottom left, jump,
++//! sneak, attack and place bottom right, the menu buttons on the right above
++//! them, and the hotbar row along the bottom centre. Everything is in GUI units
++//! (`wi` by `hi`, the size the HUD draws in), so a touch in pixels divides by
++//! the same GUI scale the HUD uses.
++use crate::hud::{HudAtlas, HudBatch};
++use crate::hud_layout;
++
++/// A button the touch handler can press.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Button {
++    Jump,
++    Sneak,
++    Attack,
++    Place,
++    Inventory,
++    Chat,
++    Pause,
++}
++
++impl Button {
++    /// The label drawn on the button.
++    pub fn label(self) -> &'static str {
++        match self {
++            Button::Jump => "JMP",
++            Button::Sneak => "SNK",
++            Button::Attack => "HIT",
++            Button::Place => "PUT",
++            Button::Inventory => "INV",
++            Button::Chat => "CHT",
++            Button::Pause => "ESC",
++        }
++    }
++}
++
++/// A rectangle in GUI units.
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub struct Rect {
++    pub x0: f32,
++    pub y0: f32,
++    pub x1: f32,
++    pub y1: f32,
++}
++
++impl Rect {
++    pub fn contains(&self, x: f32, y: f32) -> bool {
++        x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1
++    }
++    pub fn centre(&self) -> (f32, f32) {
++        ((self.x0 + self.x1) * 0.5, (self.y0 + self.y1) * 0.5)
++    }
++}
++
++/// The stick's radius in GUI units: the knob travels this far from where the
++/// thumb landed before the move counts as full speed.
++pub const STICK_RADIUS: f32 = 24.0;
++/// The stick's resting place, from the bottom left corner.
++pub const STICK_CENTRE: (f32, f32) = (52.0, 52.0);
++/// How tall the hotbar row's hit strip is, above the bottom edge.
++pub const HOTBAR_HEIGHT: f32 = 22.0;
++/// The hotbar's width: nine 20-unit slots and their padding.
++pub const HOTBAR_WIDTH: f32 = 182.0;
++const BUTTON: f32 = 44.0;
++/// The stick's drawn diameter in GUI units (the pad sprite is 64 px).
++const STICK_PAD: f32 = 120.0;
++/// The knob's drawn diameter.
++const STICK_KNOB: f32 = 56.0;
++
++/// Where everything sits on a `width` by `height` GUI screen.
++#[derive(Clone)]
++pub struct Layout {
++    pub width: f32,
++    pub height: f32,
++    pub stick: (f32, f32),
++    /// The drawn diameter of the stick's pad and knob, in GUI units.
++    pub pad: f32,
++    pub knob: f32,
++    /// How far the knob travels before a move counts as full speed.
++    pub stick_radius: f32,
++    pub buttons: [(Button, Rect); 7],
++    /// The area that turns the view: everything not taken by the stick, the
++    /// buttons or the hotbar.
++    pub look: Rect,
++    pub hotbar: Rect,
++    /// Draw the ruler: the grid of tenths and the last touch point.
++    pub debug: bool,
++    /// Where the last finger went down, in GUI units, for the mark in the ruler.
++    pub touch: Option<(f32, f32)>,
++    /// The controls can be dragged and the file is written back when they are let go.
++    pub edit: bool,
++}
++
++/// The layout for a screen `width` by `height` GUI units across.
++pub fn layout(width: f32, height: f32) -> Layout {
++    layout_with(width, height, None)
++}
++
++/// The layout of a `width` by `height` GUI screen, with the parts a person set in
++/// `Documents/touch_layout.json` left where they put them and the rest at their defaults.
++pub fn layout_with(width: f32, height: f32, custom: Option<&Custom>) -> Layout {
++    let button = custom.and_then(|c| c.button_size).unwrap_or(BUTTON).max(16.0);
++    let pad = custom.and_then(|c| c.stick_size).unwrap_or(STICK_PAD).max(40.0);
++    let knob = custom.and_then(|c| c.knob_size).unwrap_or(STICK_KNOB).max(16.0);
++    let right = width - 10.0;
++    let bottom = height - 12.0;
++    let at = |x1: f32, y1: f32| Rect {
++        x0: x1 - button,
++        y0: y1 - button,
++        x1,
++        y1,
++    };
++    // Bottom right cluster: jump and sneak in the corner column, attack and
++    // place one column left, the menus above them.
++    let buttons = [
++        (Button::Jump, at(right, bottom)),
++        (Button::Sneak, at(right, bottom - button - 6.0)),
++        (
++            Button::Attack,
++            at(right - button - 6.0, bottom),
++        ),
++        (
++            Button::Place,
++            at(right - BUTTON - 6.0, bottom - button - 6.0),
++        ),
++        (
++            Button::Inventory,
++            at(right, bottom - 2.0 * (button + 6.0)),
++        ),
++        (
++            Button::Chat,
++            at(right - BUTTON - 6.0, bottom - 2.0 * (button + 6.0)),
++        ),
++        (
++            Button::Pause,
++            at(right, bottom - 3.0 * (button + 6.0)),
++        ),
++    ];
++    let hotbar = Rect {
++        x0: (width - HOTBAR_WIDTH) * 0.5,
++        y0: height - HOTBAR_HEIGHT,
++        x1: (width + HOTBAR_WIDTH) * 0.5,
++        y1: height,
++    };
++    let put = |place: [f32; 2]| (width * place[0], height * place[1]);
++    let mut layout = Layout {
++        width,
++        height,
++        stick: (STICK_CENTRE.0, height - STICK_CENTRE.1),
++        pad,
++        knob,
++        stick_radius: pad * 0.2,
++        buttons,
++        look: Rect {
++            x0: width * 0.34,
++            y0: 0.0,
++            x1: width,
++            y1: height,
++        },
++        hotbar,
++        debug: false,
++        touch: None,
++        edit: false,
++    };
++    let Some(custom) = custom else {
++        return layout;
++    };
++    layout.debug = custom.debug.unwrap_or(false) || custom.edit.unwrap_or(false);
++    layout.edit = custom.edit.unwrap_or(false);
++    if let Some(place) = custom.stick {
++        layout.stick = put(place);
++    }
++    if let Some([x, y]) = custom.hotbar {
++        let half = HOTBAR_WIDTH * 0.5;
++        layout.hotbar = Rect {
++            x0: width * x - half,
++            y0: height * y - HOTBAR_HEIGHT,
++            x1: width * x + half,
++            y1: height * y,
++        };
++    }
++    if let Some(places) = &custom.buttons {
++        for (slot, rect) in layout.buttons.iter_mut() {
++            let Some(at) = places.get(key(*slot)) else {
++                continue;
++            };
++            // A place is the button's centre.
++            let (cx, cy) = put(*at);
++            *rect = Rect {
++                x0: cx - button * 0.5,
++                y0: cy - button * 0.5,
++                x1: cx + button * 0.5,
++                y1: cy + button * 0.5,
++            };
++        }
++    }
++    if let Some(sizes) = &custom.buttons_size {
++        for (slot, rect) in layout.buttons.iter_mut() {
++            let Some(side) = sizes.get(key(*slot)) else {
++                continue;
++            };
++            // A side is the button's own edge length, grown or shrunk around its centre.
++            let side = side.max(16.0);
++            let (cx, cy) = rect.centre();
++            *rect = Rect {
++                x0: cx - side * 0.5,
++                y0: cy - side * 0.5,
++                x1: cx + side * 0.5,
++                y1: cy + side * 0.5,
++            };
++        }
++    }
++    if let Some(share) = custom.look_from {
++        layout.look.x0 = width * share;
++    }
++    layout
++}
++
++/// The key a button is named by in `touch_layout.json`.
++fn key(button: Button) -> &'static str {
++    match button {
++        Button::Jump => "jump",
++        Button::Sneak => "sneak",
++        Button::Attack => "attack",
++        Button::Place => "place",
++        Button::Inventory => "inventory",
++        Button::Chat => "chat",
++        Button::Pause => "pause",
++    }
++}
++
++/// The parts a person set in `Documents/touch_layout.json`. Every field is optional: what is
++/// left out stays at its default, so a file with one button moved is easy to write.
++#[derive(Clone, Debug, Default, serde::Deserialize)]
++pub struct Custom {
++    /// Button side, GUI units.
++    #[serde(default)]
++    pub button_size: Option<f32>,
++    /// Stick pad and knob diameters, GUI units.
++    #[serde(default)]
++    pub stick_size: Option<f32>,
++    #[serde(default)]
++    pub knob_size: Option<f32>,
++    /// Where the stick's centre sits: `[x, y]` as shares of the screen.
++    #[serde(default)]
++    pub stick: Option<[f32; 2]>,
++    /// Where the hotbar row's bottom edge sits: `[x, y]` as shares of the screen.
++    #[serde(default)]
++    pub hotbar: Option<[f32; 2]>,
++    /// Button centres, by name: `{ "jump": [0.93, 0.93] }`.
++    #[serde(default)]
++    pub buttons: Option<std::collections::BTreeMap<String, [f32; 2]>>,
++    /// Button sides that differ from `button_size`, by name: `{ "jump": 60 }`.
++    #[serde(default)]
++    pub buttons_size: Option<std::collections::BTreeMap<String, f32>>,
++    /// The share of the width where the look area starts, leaving the left to the stick.
++    #[serde(default)]
++    pub look_from: Option<f32>,
++    /// Draw a grid of tenths and a mark where the last finger landed, so a person can read
++    /// the shares to write in this file.
++    #[serde(default)]
++    pub debug: Option<bool>,
++    /// Start with the controls picked up and movable by hand.
++    #[serde(default)]
++    pub edit: Option<bool>,
++}
++
++/// The file a person edits, written the first time the client runs so its format is there to
++/// copy rather than to guess.
++pub const FILE: &str = "touch_layout.json";
++
++/// A layout baked into the build, so a fresh install starts where the person put the
++/// controls instead of where the defaults are. Empty means the defaults are written.
++pub const BAKED: &str = concat!(
++    "{",
++    "  \"button_size\": 18,",
++    "  \"buttons\": {",
++    "    \"attack\": [",
++    "      0.827,",
++    "      0.699",
++    "    ],",
++    "    \"chat\": [",
++    "      0.479,",
++    "      0.041",
++    "    ],",
++    "    \"inventory\": [",
++    "      0.672,",
++    "      0.959",
++    "    ],",
++    "    \"jump\": [",
++    "      0.927,",
++    "      0.398",
++    "    ],",
++    "    \"pause\": [",
++    "      0.521,",
++    "      0.041",
++    "    ],",
++    "    \"place\": [",
++    "      0.927,",
++    "      0.797",
++    "    ],",
++    "    \"sneak\": [",
++    "      0.926,",
++    "      0.6",
++    "    ]",
++    "  },",
++    "  \"buttons_size\": {",
++    "    \"attack\": 30,",
++    "    \"chat\": 18,",
++    "    \"inventory\": 18,",
++    "    \"jump\": 30,",
++    "    \"pause\": 18,",
++    "    \"place\": 30,",
++    "    \"sneak\": 30",
++    "  },",
++    "  \"debug\": false,",
++    "  \"edit\": false,",
++    "  \"hotbar\": [",
++    "    0.5,",
++    "    1.0",
++    "  ],",
++    "  \"knob_size\": 31,",
++    "  \"look_from\": 0.34,",
++    "  \"stick\": [",
++    "    0.148,",
++    "    0.749",
++    "  ],",
++    "  \"stick_size\": 66",
++    "}",
++);
++
++/// The layout a person would find in the file if it were written now: the defaults.
++#[must_use]
++pub fn default_file(width: f32, height: f32) -> String {
++    if !BAKED.is_empty() {
++        return BAKED.to_owned();
++    }
++    let mut places = std::collections::BTreeMap::new();
++    let layout = layout(width, height);
++    let share = |x: f32, y: f32| [x / layout.width, y / layout.height];
++    for (button, rect) in layout.buttons {
++        let (x, y) = rect.centre();
++        let [x, y] = share(x, y);
++        places.insert(
++            key(button).to_owned(),
++            [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)],
++        );
++    }
++    let [sx, sy] = share(layout.stick.0, layout.stick.1);
++    let doc = serde_json::json!({
++        "button_size": BUTTON,
++        "stick_size": STICK_PAD,
++        "knob_size": STICK_KNOB,
++        "stick": [sx, sy],
++        "hotbar": [0.5, 1.0],
++        "look_from": 0.34,
++        "buttons": places,
++    });
++    serde_json::to_string_pretty(&doc).unwrap_or_default()
++}
++
++impl Layout {
++    /// The button under a point in GUI units, or `None` in the look or stick
++    /// area.
++    pub fn button_at(&self, x: f32, y: f32) -> Option<Button> {
++        self.buttons
++            .iter()
++            .find(|(_, rect)| rect.contains(x, y))
++            .map(|(button, _)| *button)
++    }
++    /// The handle the layout button occupies: top-left corner, small enough to miss while
++    /// playing and big enough to hit with a thumb.
++    #[must_use]
++    /// Where the layout's own toggle sat. Nothing draws it now — the layout is the file
++    /// and nothing else — but the hit test that used to be there stays out of the corner:
++    /// a thumb resting in it is a drag, not a button.
++    pub fn toggle(&self) -> Rect {
++        Rect {
++            x0: 0.0,
++            y0: 0.0,
++            x1: 0.0,
++            y1: 0.0,
++        }
++    }
++    /// The control a point in GUI units picks up, looking at the buttons first and the stick's
++    /// whole pad after them.
++    #[must_use]
++    pub fn handle_at(&self, x: f32, y: f32) -> Option<Handle> {
++        if let Some(button) = self.button_at(x, y) {
++            return Some(Handle::Button(button));
++        }
++        let (sx, sy) = self.stick;
++        let half = self.pad * 0.5;
++        if (x - sx).abs() <= half && (y - sy).abs() <= half {
++            return Some(Handle::Stick);
++        }
++        self.hotbar.contains(x, y).then_some(Handle::Hotbar)
++    }
++    /// Puts a control's centre at a point in GUI units.
++    pub fn move_handle(&mut self, handle: Handle, x: f32, y: f32) {
++        let (x, y) = (x.clamp(0.0, self.width), y.clamp(0.0, self.height));
++        match handle {
++            Handle::Stick => {
++                self.stick = (x, y);
++            }
++            Handle::Button(button) => {
++                let side = self
++                    .buttons
++                    .iter()
++                    .find(|(slot, _)| *slot == button)
++                    .map_or(44.0, |(_, rect)| rect.x1 - rect.x0);
++                if let Some((_, rect)) = self.buttons.iter_mut().find(|(slot, _)| *slot == button) {
++                    *rect = Rect {
++                        x0: x - side * 0.5,
++                        y0: y - side * 0.5,
++                        x1: x + side * 0.5,
++                        y1: y + side * 0.5,
++                    };
++                }
++            }
++            Handle::Hotbar => {
++                // The hotbar keeps its width; only its middle moves.
++                let half = (self.hotbar.x1 - self.hotbar.x0) * 0.5;
++                let height = self.hotbar.y1 - self.hotbar.y0;
++                self.hotbar = Rect {
++                    x0: x - half,
++                    y0: y - height,
++                    x1: x + half,
++                    y1: y,
++                };
++            }
++        }
++    }
++    /// The file that would put every control back where it is now.
++    #[must_use]
++    pub fn file(&self) -> String {
++        let share = |x: f32, y: f32| [x / self.width, y / self.height];
++        let mut places = std::collections::BTreeMap::new();
++        for (button, rect) in self.buttons {
++            let (x, y) = rect.centre();
++            let [x, y] = share(x, y);
++            places.insert(key(button).to_owned(), [x, y]);
++        }
++        let [sx, sy] = share(self.stick.0, self.stick.1);
++        let [hx, hy] = share(
++            (self.hotbar.x0 + self.hotbar.x1) * 0.5,
++            self.hotbar.y1,
++        );
++        let mut sides = std::collections::BTreeMap::new();
++        for (button, rect) in self.buttons {
++            sides.insert(key(button).to_owned(), (rect.x1 - rect.x0).round());
++        }
++        let doc = serde_json::json!({
++            "button_size": (self.buttons[0].1.x1 - self.buttons[0].1.x0).round(),
++            "buttons_size": sides,
++            "stick_size": self.pad.round(),
++            "knob_size": self.knob.round(),
++            "stick": [sx, sy],
++            "hotbar": [hx, hy],
++            "look_from": self.look.x0 / self.width,
++            "buttons": places,
++            "debug": self.debug,
++            "edit": self.edit,
++        });
++        serde_json::to_string_pretty(&doc).unwrap_or_default()
++    }
++    /// Whether a point in GUI units is in the stick's half of the screen.
++    pub fn on_stick(&self, x: f32, y: f32) -> bool {
++        x < self.look.x0 && y > self.height * 0.35
++    }
++    /// The hotbar slot (0-8) under a point in GUI units.
++    pub fn hotbar_slot(&self, x: f32, y: f32) -> Option<usize> {
++        if !self.hotbar.contains(x, y) {
++            return None;
++        }
++        let slot = ((x - self.hotbar.x0) / (HOTBAR_WIDTH / 9.0)) as i32;
++        Some(slot.clamp(0, 8) as usize)
++    }
++}
++
++/// Something the hand can pick up in edit mode.
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Handle {
++    Stick,
++    Button(Button),
++    Hotbar,
++}
++
++/// The sprite of a button in `gui/sprites/horizon/touch/`.
++fn sprite(button: Button, down: bool) -> &'static str {
++    match (button, down) {
++        (Button::Jump, false) => "horizon/touch/jump",
++        (Button::Jump, true) => "horizon/touch/jump_active",
++        (Button::Sneak, false) => "horizon/touch/sneak",
++        (Button::Sneak, true) => "horizon/touch/sneak_active",
++        (Button::Attack, false) => "horizon/touch/attack",
++        (Button::Attack, true) => "horizon/touch/attack_active",
++        (Button::Place, false) => "horizon/touch/use",
++        (Button::Place, true) => "horizon/touch/use_active",
++        (Button::Inventory, false) => "horizon/touch/inventory",
++        (Button::Inventory, true) => "horizon/touch/inventory_active",
++        (Button::Chat, false) => "horizon/touch/chat",
++        (Button::Chat, true) => "horizon/touch/chat_active",
++        (Button::Pause, false) => "horizon/touch/pause",
++        (Button::Pause, true) => "horizon/touch/pause_active",
++    }
++}
++
++/// A sprite blit in GUI units, at its own size.
++fn blit(draws: &mut Vec<hud_layout::GuiDraw>, sprite: &'static str, x: f32, y: f32, w: f32, h: f32) {
++    draws.push(hud_layout::GuiDraw::Sprite {
++        sprite: std::borrow::Cow::Borrowed(sprite),
++        x: x.round() as i32,
++        y: y.round() as i32,
++        w: w.round() as i32,
++        h: h.round() as i32,
++        region: None,
++        color: 0xFFFF_FFFF,
++        blend: hud_layout::Blend::Textured,
++    });
++}
++
++/// Draws the controls: the stick with its knob at `knob`, and every button,
++/// its pressed sprite while `held` says its finger is down. A control whose
++/// sprite the atlas lacks still gets a plate, so the controls are usable with
++/// a resource pack that predates them.
++/// A frame one unit thick around a control, so an edit-mode control is easy to see.
++fn outline(draws: &mut Vec<hud_layout::GuiDraw>, rect: Rect, color: u32) {
++    let (x0, y0) = (rect.x0.round() as i32, rect.y0.round() as i32);
++    let (x1, y1) = (rect.x1.round() as i32, rect.y1.round() as i32);
++    let mut part = |a: [i32; 4]| {
++        draws.push(hud_layout::fill(a[0], a[1], a[2], a[3], color));
++    };
++    part([x0, y0, x1, y0 + 1]);
++    part([x0, y1 - 1, x1, y1]);
++    part([x0, y0, x0 + 1, y1]);
++    part([x1 - 1, y0, x1, y1]);
++}
++
++/// Draws the ruler a person reads shares off: a line every tenth of the screen, brighter every
++/// half, and a mark where the last finger landed. `GuiDraw` has no text, so the lines carry the
++/// numbers and the exact values are in `horizon.log`.
++fn ruler(draws: &mut Vec<hud_layout::GuiDraw>, layout: &Layout) {
++    let (w, h) = (layout.width, layout.height);
++    let (wi, hi) = (w.round() as i32, h.round() as i32);
++    for step in 1..10 {
++        let share = step as f32 * 0.1;
++        // Every fifth line is the half-way mark a person can count from.
++        let faint = step % 5 == 0 || step == 1 || step == 9;
++        let color = if faint { 0x80_FF_FF_FF } else { 0x38_FF_FF_FF };
++        let x = (w * share).round() as i32;
++        draws.push(hud_layout::fill(x, 0, x + 1, hi, color));
++        let y = (h * share).round() as i32;
++        draws.push(hud_layout::fill(0, y, wi, y + 1, color));
++    }
++    if let Some((x, y)) = layout.touch {
++        // A cross the size of a button, so the mark is easy to find on a screenshot.
++        let arm = 11.0;
++        let (x, y) = (x.round() as i32, y.round() as i32);
++        let color = 0xC0_FF_50_50;
++        draws.push(hud_layout::fill(x - arm as i32, y, x + arm as i32, y + 1, color));
++        draws.push(hud_layout::fill(x, y - arm as i32, x + 1, y + arm as i32, color));
++    }
++}
++
++pub fn paint(
++    batch: &mut HudBatch,
++    atlas: &HudAtlas,
++    layout: &Layout,
++    knob: (f32, f32),
++    held: impl Fn(Button) -> bool,
++) {
++    let mut draws = Vec::new();
++    let mut absent = Vec::new();
++    let mut control = |draws: &mut Vec<hud_layout::GuiDraw>, sprite: &'static str, x: f32, y: f32, w: f32, h: f32| {
++        blit(draws, sprite, x, y, w, h);
++        if !atlas.sprites.contains_key(sprite) {
++            absent.push(sprite);
++            draws.push(hud_layout::fill(
++                x.round() as i32,
++                y.round() as i32,
++                (x + w).round() as i32,
++                (y + h).round() as i32,
++                0x90_1A_1A_20,
++            ));
++        }
++    };
++    if layout.debug {
++        ruler(&mut draws, layout);
++    }
++    if layout.edit {
++        // Picked-up controls wear a bright frame, so it is clear what can be dragged.
++        let edge = 0xC0_FF_D0_40;
++        for (_, rect) in &layout.buttons {
++            outline(&mut draws, *rect, edge);
++        }
++        let (sx, sy) = layout.stick;
++        let half = layout.pad * 0.5;
++        outline(
++            &mut draws,
++            Rect {
++                x0: sx - half,
++                y0: sy - half,
++                x1: sx + half,
++                y1: sy + half,
++            },
++            edge,
++        );
++        outline(&mut draws, layout.hotbar, edge);
++    }
++    let (sx, sy) = layout.stick;
++    control(
++        &mut draws,
++        "horizon/touch/pad",
++        sx - layout.pad * 0.5,
++        sy - layout.pad * 0.5,
++        layout.pad,
++        layout.pad,
++    );
++    control(
++        &mut draws,
++        "horizon/touch/stick",
++        knob.0 - layout.knob * 0.5,
++        knob.1 - layout.knob * 0.5,
++        layout.knob,
++        layout.knob,
++    );
++    for (button, rect) in &layout.buttons {
++        let down = held(*button);
++        let side = rect.x1 - rect.x0;
++        let sprite = sprite(*button, down);
++        control(&mut draws, sprite, rect.x0, rect.y0, side, side);
++    }
++    static REPORTED: std::sync::Once = std::sync::Once::new();
++    REPORTED.call_once(|| {
++        log::info!(
++            "Horizon: touch sprites missing from the atlas: {} ({})",
++            absent.len(),
++            absent.join(", ")
++        );
++    });
++    hud_layout::paint(batch, atlas, &draws);
++}
+diff --git a/crates/horizon-client/Cargo.toml b/crates/horizon-client/Cargo.toml
+index 77b9096..829255d 100644
+--- a/crates/horizon-client/Cargo.toml
++++ b/crates/horizon-client/Cargo.toml
+@@ -98,6 +98,12 @@ rustix = { version = "1", default-features = false, features = ["std", "time", "
+ # (dxcompiler.dll beside the game, gfx/dx12_compiler.rs).
+ wgpu = { version = "30.0.1", default-features = false, features = ["dx12"] }
+ 
++[target.'cfg(target_os = "ios")'.dependencies]
++# A touch screen has to hear more than one finger: the stick and the view are two of them,
++# and UIKit's default is to deliver only the first (game/ios_multitouch.rs). The view comes
++# out of the window handle; setting the flag on it is `horizon_threads`' call to make.
++raw-window-handle = "0.6"
++
+ [target.'cfg(target_os = "macos")'.dependencies]
+ # Splitscreen: a window filling a monitor goes over its menu bar (game/split/windows.rs
+ # `above_menu_bar`); all already in the tree through winit and wgpu.
+@@ -111,6 +117,10 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
+ wgpu = { version = "30.0.1", default-features = false, features = ["gles"] }
+ 
+ [features]
++# The on-screen touch controls of the iOS client (stick, look area, buttons over
++# the HUD). Off by default: a desktop build has a keyboard and a mouse.
++ios-touch = []
++
+ default = ["audio", "controllers", "horizon-extras"]
+ # Sound output. Without it (and `controllers`) the program links neither libasound nor libudev on
+ # Linux: the server build (`--no-default-features`, released as horizon-engine; docs/server.md).
+diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
+index bbc296d..0e610d6 100644
+--- a/crates/horizon-client/src/game.rs
++++ b/crates/horizon-client/src/game.rs
+@@ -187,6 +187,9 @@ mod hud_room;
+ mod ime;
+ mod initial_spawn;
+ mod input_trace;
++pub mod ios_touch;
++#[cfg(target_os = "ios")]
++pub mod ios_multitouch;
+ mod integrated;
+ mod interaction_shapes;
+ mod interactions;
+@@ -2293,6 +2296,9 @@ struct Game<'a> {
+     focus_after_run: Option<bool>,
+     /// Whether the window currently accepts input method events.
+     ime_allowed: bool,
++    /// iOS: the keyboard was put away by a tap, so a field that still has the
++    /// focus does not ask for it back.
++    ime_suppressed: bool,
+     /// The candidate window's area last given to the window, in pixels.
+     ime_area: Option<[i32; 4]>,
+     /// When the window lost focus, while it is still without
+@@ -6173,6 +6179,14 @@ impl Game<'_> {
+             self.gui_layer("minecraft:title", &mut batch, |g, batch| {
+                 g.draw_title(batch);
+             });
++            // The on-screen controls, over the HUD: only while playing, where the
++            // fingers are the stick, the look area and the buttons.
++            #[cfg(all(target_os = "ios", feature = "ios-touch"))]
++            if self.screen == Screen::Playing && self.title.is_none() {
++                self.gui_layer("horizon:touch_controls", &mut batch, |g, batch| {
++                    g.draw_touch_controls(batch);
++                });
++            }
+             self.gui_layer("minecraft:scoreboard_sidebar", &mut batch, |g, batch| {
+                 g.draw_scoreboard(batch);
+             });
+@@ -9860,6 +9874,16 @@ impl Game<'_> {
+             && let Some(text) = key_event.text.as_deref()
+         {
+             let text: String = text.chars().filter(|c| !c.is_control()).collect();
++            // What an input method commits arrives here: a phone's keyboard sends no key
++            // code, only the text. The log line is how a build without a keyboard to try
++            // is told whether the characters reached the game at all.
++            if !text.is_empty() {
++                log::info!(
++                    "Horizon: typed text {text:?} focused={} types={}",
++                    self.text_field_focused(),
++                    self.types_text()
++                );
++            }
+             if !text.is_empty() && self.text_field_focused() && self.types_text() {
+                 let _ = self.type_chars_into_screen(&text);
+             }
+@@ -11476,6 +11500,7 @@ impl<'a> Game<'a> {
+             unclaimed_window: false,
+             focus_after_run: None,
+             ime_allowed: false,
++            ime_suppressed: false,
+             ime_area: None,
+             focus_lost: None,
+             modifiers: winit::keyboard::ModifiersState::empty(),
+diff --git a/crates/horizon-client/src/game/control.rs b/crates/horizon-client/src/game/control.rs
+index 1e316ad..b07dbde 100644
+--- a/crates/horizon-client/src/game/control.rs
++++ b/crates/horizon-client/src/game/control.rs
+@@ -1393,7 +1393,7 @@ impl Game<'_> {
+         Ok(())
+     }
+ 
+-    fn control_key_down(&mut self, key: KeyCode, raw: KeyCode) -> Result<()> {
++    pub(super) fn control_key_down(&mut self, key: KeyCode, raw: KeyCode) -> Result<()> {
+         self.physical_keys.insert(key);
+         // The window's shortcuts come before any screen, here too.
+         if self.screenshot_shortcut(key, false) {
+@@ -1422,7 +1422,7 @@ impl Game<'_> {
+ 
+     /// `key ... up`: the script lets go. What it pressed as the keyboard's stand-in goes with it
+     /// (a fixture's untagged press), and a controller's hold stays.
+-    fn control_key_up(&mut self, key: KeyCode) {
++    pub(super) fn control_key_up(&mut self, key: KeyCode) {
+         self.keys.release(&key, Source::Agent);
+         self.keys.release(&key, Source::Keyboard);
+     }
+diff --git a/crates/horizon-client/src/game/ime.rs b/crates/horizon-client/src/game/ime.rs
+index 02acdc1..b6b4d4b 100644
+--- a/crates/horizon-client/src/game/ime.rs
++++ b/crates/horizon-client/src/game/ime.rs
+@@ -44,9 +44,35 @@ impl Game<'_> {
+         }
+     }
+ 
++    /// A tap that landed away from the field the keyboard was opened for puts
++    /// the keyboard away; one on the field keeps it. iOS has no Escape key to
++    /// reach for, and the software keyboard covers the screen's own buttons.
++    #[cfg(target_os = "ios")]
++    pub(super) fn ios_tap(&mut self, x: f64, y: f64) {
++        if !self.ime_allowed {
++            return;
++        }
++        let on_the_field = self.ime_area.is_some_and(|[ax, ay, aw, ah]| {
++            let (x0, y0) = (f64::from(ax), f64::from(ay));
++            let (w, h) = (f64::from(aw), f64::from(ah));
++            (x0..=x0 + w).contains(&x) && (y0..=y0 + h).contains(&y)
++        });
++        self.ime_suppressed = !on_the_field;
++        self.sync_ime();
++    }
+     /// Allow the input method only while a text box has focus.
+     pub(super) fn sync_ime(&mut self) {
+-        let want = self.text_field_focused();
++        let focused_now = self.text_field_focused();
++        #[cfg(target_os = "ios")]
++        let focused_now = {
++            // Dismissed by a tap: the field keeps its text and its cursor, the
++            // keyboard stays away until the focus moves to another field.
++            if !focused_now {
++                self.ime_suppressed = false;
++            }
++            focused_now && !self.ime_suppressed
++        };
++        let want = focused_now;
+         if want != self.ime_allowed
+             && let Some(window) = &self.window
+         {
+diff --git a/crates/horizon-client/src/game/ios_multitouch.rs b/crates/horizon-client/src/game/ios_multitouch.rs
+new file mode 100644
+index 0000000..e4c0534
+--- /dev/null
++++ b/crates/horizon-client/src/game/ios_multitouch.rs
+@@ -0,0 +1,28 @@
++//! More than one finger at a time, on a touch screen.
++//!
++//! `UIView.multipleTouchEnabled` is off by default, and the view winit makes for its iOS
++//! window leaves it that way: the first finger down owns the view's touches, and a second
++//! one is not delivered at all. A person holding the stick and turning the view with another
++//! finger then loses the stick the moment the second finger lands, which reads as the player
++//! stopping while the view turns.
++//!
++//! It is one flag on the view. The view comes out of the window handle; the flag is set in
++//! `horizon_threads`, which may make the unsafe call this crate may not.
++
++use winit::window::Window;
++
++/// Let the window's view report every finger.
++pub(super) fn enable(window: &Window) {
++    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
++    let Ok(handle) = window.window_handle() else {
++        log::warn!("iOS: no window handle, single touch only");
++        return;
++    };
++    let RawWindowHandle::UiKit(uikit) = handle.as_raw() else {
++        log::warn!("iOS: window handle is not UIKit, single touch only");
++        return;
++    };
++    // The call itself is `horizon_threads`': this crate forbids unsafe code.
++    horizon_threads::ios_multitouch::set_multiple_touch_enabled(uikit.ui_view.as_ptr());
++    log::info!("iOS: multiple touch enabled on the window's view");
++}
+diff --git a/crates/horizon-client/src/game/ios_touch.rs b/crates/horizon-client/src/game/ios_touch.rs
+new file mode 100644
+index 0000000..e98e89c
+--- /dev/null
++++ b/crates/horizon-client/src/game/ios_touch.rs
+@@ -0,0 +1,529 @@
++//! Touch, on iOS: the stick, the look area and the buttons of `touch_hud`
++//! turned into the key and mouse holds a keyboard and a mouse would make.
++//! Bedrock is touch-first; this is the same idea on top of the desktop client's
++//! input, so every screen (chat, the inventory, a book) keeps working through
++//! the keys it already listens for.
++//!
++//! The controls only take over while playing: in a menu a tap stays a click,
++//! which is what the touch-to-pointer mapping in `window_handler` gives.
++use super::*;
++use winit::event::TouchPhase;
++use horizon_client_input::held::Source;
++use horizon_client_render::touch_hud::{self, Button, Layout};
++use std::sync::{Mutex, OnceLock};
++
++/// What the fingers are doing right now.
++#[derive(Default)]
++struct Touch {
++    /// The layout of the frame the touches are tested against.
++    layout: Option<Layout>,
++    /// The finger on the stick, and where it landed.
++    stick: Option<u64>,
++    origin: (f32, f32),
++    /// The finger turning the view, and where it was last seen.
++    look: Option<u64>,
++    last: (f32, f32),
++    /// The buttons held down, by the finger holding them.
++    held: Vec<(u64, Button)>,
++    /// Buttons whose finger has just lifted, held a moment longer: a tap hands
++    /// us Started and Ended in the same millisecond, so the frame that reads
++    /// the button would never see it down. Kept until the deadline passes.
++    latched: Vec<(Button, std::time::Instant)>,
++    /// Where the last finger went down, in GUI units, for the ruler's mark.
++    mark: Option<(f32, f32)>,
++    /// Where the stick's knob sits, in GUI units.
++    knob: (f32, f32),
++    /// Drag motion a finger has reported but the view has not turned by yet,
++    /// in window pixels: a touch reports its motion in bursts and a burst
++    /// handed over whole is a lurch.
++    pending: (f64, f64),
++    /// The controls are picked up by hand: a finger on one drags it, and letting
++    /// go writes the file.
++    edit: bool,
++    /// The ruler is drawn, so a person can read the shares off the screen.
++    debug: bool,
++    /// A finger that is holding mine or place and has slid: it keeps the button
++    /// down and turns the view with the same finger, which is how mining and
++    /// building are done with a thumb.
++    slide: Option<(u64, touch_hud::Handle, (f32, f32))>,
++    /// The control the finger is moving right now.
++    drag: Option<touch_hud::Handle>,
++}
++
++/// How long a tapped button stays down after the finger lifts, so the frame
++/// that reads input always sees a tap.
++const LATCH: std::time::Duration = std::time::Duration::from_millis(90);
++
++/// A finger drag has to turn the view as far as a mouse moved the same distance
++/// would, and a thumb has less room than a desk has: the drag is stretched the
++/// way the mobile ports this was checked against stretch theirs.
++const LOOK_GAIN: f64 = 1.6;
++
++/// The file a person edits to move the controls: `Documents/touch_layout.json`, which is in
++/// the Files app because the app shares its Documents folder.
++fn layout_file() -> Option<std::path::PathBuf> {
++    let home = std::env::var_os("HOME")?;
++    Some(std::path::PathBuf::from(home).join("Documents").join(touch_hud::FILE))
++}
++
++/// Writes the layout back, so a control dragged into place is still there after a restart.
++fn write_layout(layout: &Layout) {
++    let Some(path) = layout_file() else {
++        return;
++    };
++    if let Err(error) = std::fs::write(&path, layout.file()) {
++        log::warn!("Horizon: touch layout {}: {error}", path.display());
++    }
++}
++
++/// The layout a person edited, re-read when the file changes and written out in full the
++/// first time so its format is there to copy rather than to guess.
++#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
++fn custom_layout(width: f32, height: f32) -> Option<touch_hud::Custom> {
++    static CACHE: OnceLock<Mutex<Cached>> = OnceLock::new();
++    let path = layout_file()?;
++    let cache = CACHE.get_or_init(|| Mutex::new(Cached::default()));
++    let mut held = cache.lock().unwrap_or_else(|poison| poison.into_inner());
++    // A drag reports motion at the display's rate; the file is looked at once a second.
++    let fresh = held.checked.is_some_and(|at| at.elapsed() < std::time::Duration::from_secs(1));
++    let stamp = if fresh {
++        held.stamp
++    } else {
++        held.checked = Some(std::time::Instant::now());
++        std::fs::metadata(&path).and_then(|meta| meta.modified()).ok()
++    };
++    if stamp.is_some() && held.stamp == stamp {
++        return held.custom.clone();
++    }
++    let custom = match std::fs::read_to_string(&path) {
++        Ok(text) => match serde_json::from_str::<touch_hud::Custom>(&text) {
++            Ok(custom) => {
++                log::info!("Horizon: touch layout read from {}", path.display());
++                Some(custom)
++            }
++            Err(error) => {
++                // A broken file keeps the defaults rather than taking the controls away.
++                log::warn!("Horizon: touch layout {}: {error}", path.display());
++                None
++            }
++        },
++        Err(error) => {
++            if error.kind() == std::io::ErrorKind::NotFound {
++                let text = touch_hud::default_file(width, height);
++                match std::fs::write(&path, &text) {
++                    Ok(()) => log::info!("Horizon: touch layout written to {}", path.display()),
++                    Err(error) => log::warn!("Horizon: touch layout {}: {error}", path.display()),
++                }
++                serde_json::from_str(&text).ok()
++            } else {
++                log::warn!("Horizon: touch layout {}: {error}", path.display());
++                None
++            }
++        }
++    };
++    held.stamp = std::fs::metadata(&path).and_then(|meta| meta.modified()).ok();
++    held.custom = custom.clone();
++    custom
++}
++
++/// The layout file as last read: its stamp, what it said, and when it was last looked at.
++#[derive(Default)]
++struct Cached {
++    stamp: Option<std::time::SystemTime>,
++    custom: Option<touch_hud::Custom>,
++    checked: Option<std::time::Instant>,
++}
++
++fn touch() -> &'static Mutex<Touch> {
++    static TOUCH: OnceLock<Mutex<Touch>> = OnceLock::new();
++    TOUCH.get_or_init(|| Mutex::new(Touch::default()))
++}
++
++#[cfg_attr(not(target_os = "ios"), allow(dead_code))]
++impl Game<'_> {
++    /// The framebuffer the renderer draws into.
++    fn framebuffer(&self) -> (u32, u32) {
++        self.renderer
++            .as_ref()
++            .map_or((0, 0), |renderer| (renderer.config.width, renderer.config.height))
++    }
++    /// A touch, in physical pixels, as the controls see it.
++    pub(super) fn ios_touch(&mut self, id: u64, phase: TouchPhase, x: f64, y: f64) {
++        // A finger that lifts is always let go of, whatever the screen says
++        // now: a press whose release is dropped leaves a key held down, and a
++        // held jump key jumps again every time the view turns.
++        if matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
++            self.ios_release(id);
++            return;
++        }
++        if self.screen != Screen::Playing {
++            // A container screen has no Escape key on a phone: a tap beside its panel closes
++            // it, as the mouse does on the desktop, unless a stack is carried — that tap
++            // drops the stack, and the screen stays open for the rest of it.
++            if matches!(phase, TouchPhase::Started) {
++                let _ = self.ios_container_tap(x, y);
++            }
++            return;
++        }
++        if self.pad_radial_captures() {
++            return;
++        }
++        let (width, height) = self.framebuffer();
++        if width == 0 || height == 0 {
++            return;
++        }
++        let scale = horizon_client::hud::HudBatch::new([width, height]).scale;
++        let (gui_x, gui_y) = (x as f32 / scale, y as f32 / scale);
++        let layout = touch_hud::layout_with(
++            (width as f32 / scale).ceil(),
++            (height as f32 / scale).ceil(),
++            custom_layout(
++                (width as f32 / scale).ceil(),
++                (height as f32 / scale).ceil(),
++            )
++            .as_ref(),
++        );
++        // Only a touch that starts or ends is logged: a drag reports `Moved` at
++        // the display's rate, and a line per move is a file write per move.
++        if !matches!(phase, TouchPhase::Moved) {
++            let share_x = gui_x / layout.width;
++            let share_y = gui_y / layout.height;
++            log::info!(
++                "Horizon: touch {id} {phase:?} gui {gui_x:.0},{gui_y:.0} of {width}x{height} (share {share_x:.3},{share_y:.3}) scale {scale}"
++            );
++        }
++        let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++        state.mark = Some((gui_x, gui_y));
++        state.layout = Some(layout.clone());
++        match phase {
++            TouchPhase::Started => {
++                if let Some(button) = layout.button_at(gui_x, gui_y) {
++                    log::info!("Horizon: touch {id} on button {button:?}");
++                    state.held.push((id, button));
++                    if matches!(button, Button::Attack | Button::Place) {
++                        state.slide = Some((id, touch_hud::Handle::Button(button), (x as f32, y as f32)));
++                    }
++                    drop(state);
++                    self.ios_button(button, true);
++                } else if let Some(slot) = layout.hotbar_slot(gui_x, gui_y) {
++                    drop(state);
++                    self.ios_hotbar(slot);
++                } else if layout.on_stick(gui_x, gui_y) {
++                    log::info!("Horizon: touch {id} on the stick");
++                    state.stick = Some(id);
++                    state.origin = (gui_x, gui_y);
++                    state.knob = (gui_x, gui_y);
++                } else {
++                    log::info!("Horizon: touch {id} turns the view");
++                    state.look = Some(id);
++                    // The pointer the game turns with moves in physical pixels
++                    // (`WindowEvent::CursorMoved`), so the view is turned by the
++                    // motion in those, not by the coarser GUI units the layout is
++                    // measured in.
++                    state.last = (x as f32, y as f32);
++                }
++            }
++            TouchPhase::Moved => {
++                if let Some((finger, handle, at)) = state.slide {
++                    if finger == id {
++                        let (dx, dy) = (x as f32 - at.0, y as f32 - at.1);
++                        state.slide = Some((id, handle, (x as f32, y as f32)));
++                        state.mark = Some((gui_x, gui_y));
++                        drop(state);
++                        self.ios_look(f64::from(dx), f64::from(dy));
++                        return;
++                    }
++                }
++                if state.stick == Some(id) {
++                    let (dx, dy) = (gui_x - state.origin.0, gui_y - state.origin.1);
++                    let length = (dx * dx + dy * dy).sqrt();
++                    let reach = layout.stick_radius;
++                    let (kx, ky) = if length > reach {
++                        (dx * reach / length, dy * reach / length)
++                    } else {
++                        (dx, dy)
++                    };
++                    state.knob = (state.origin.0 + kx, state.origin.1 + ky);
++                    drop(state);
++                    self.ios_stick(kx / reach, -ky / reach);
++                } else if state.look == Some(id) {
++                    let (px, py) = (x as f32, y as f32);
++                    let (dx, dy) = (px - state.last.0, py - state.last.1);
++                    state.last = (px, py);
++                    drop(state);
++                    self.ios_look(f64::from(dx), f64::from(dy));
++                }
++            }
++            // A lifting finger is handled by `ios_release`, before the gates.
++            TouchPhase::Ended | TouchPhase::Cancelled => drop(state),
++        }
++    }
++    /// The stick, as a direction with each axis in `-1..=1`.
++    fn ios_stick(&mut self, right: f32, forward: f32) {
++        const DEAD: f32 = 0.25;
++        self.ios_key(KeyCode::KeyW, forward > DEAD);
++        self.ios_key(KeyCode::KeyS, forward < -DEAD);
++        self.ios_key(KeyCode::KeyD, right > DEAD);
++        self.ios_key(KeyCode::KeyA, right < -DEAD);
++        self.ios_key(
++            KeyCode::ControlLeft,
++            right.abs() > 0.92 || forward.abs() > 0.92,
++        );
++    }
++    /// A tap on the hotbar row picks that slot.
++    fn ios_hotbar(&mut self, slot: usize) {
++        const SLOTS: [KeyCode; 9] = [
++            KeyCode::Digit1,
++            KeyCode::Digit2,
++            KeyCode::Digit3,
++            KeyCode::Digit4,
++            KeyCode::Digit5,
++            KeyCode::Digit6,
++            KeyCode::Digit7,
++            KeyCode::Digit8,
++            KeyCode::Digit9,
++        ];
++        if let Some(code) = SLOTS.get(slot).copied() {
++            self.ios_key(code, true);
++            self.ios_key(code, false);
++        }
++    }
++    /// A button, pressed or let go.
++    fn ios_button(&mut self, button: Button, pressed: bool) {
++        match button {
++            Button::Jump => self.ios_key(KeyCode::Space, pressed),
++            Button::Sneak => self.ios_sneak(pressed),
++            Button::Attack => self.ios_mouse(MouseButton::Left, pressed),
++            Button::Place => self.ios_mouse(MouseButton::Right, pressed),
++            Button::Inventory => self.ios_key(KeyCode::KeyE, pressed),
++            Button::Chat => self.ios_key(KeyCode::KeyT, pressed),
++            Button::Pause => self.ios_key(KeyCode::Escape, pressed),
++        }
++    }
++    /// Sneak, as a tap: a finger cannot hold a key down for a walk, so the button flips the
++    /// toggle the mapping keeps instead of holding it. A press flips it, a release does
++    /// nothing: with the vanilla `toggle_crouch`, a hold would sneak for the length of the tap
++    /// only, which is under a frame at the rate a finger lifts.
++    fn ios_sneak(&mut self, pressed: bool) {
++        if !pressed {
++            return;
++        }
++        let slot = horizon_client_input::keymapping::SNEAK;
++        let screen_open = !super::key_codes::gameplay_has_keyboard(
++            self.screen,
++            self.title.is_some(),
++            self.screen_over_playing(),
++        );
++        self.toggles.pad_toggle(slot, screen_open);
++        self.sync_toggle(slot);
++        log::info!("Horizon: touch sneak toggled to {}", self.toggles.is_down(slot));
++    }
++    /// A tap on a screen with a container: beside the panel it closes the screen, when nothing
++    /// is on the cursor. A tap with a stack carried is a drop, and the screen stays. `true`
++    /// when the tap closed the screen: the caller then drops it, so it is not also a click on
++    /// whatever the finger covered.
++    pub(super) fn ios_container_tap(&mut self, x: f64, y: f64) -> bool {
++        let (width, height) = self.framebuffer();
++        if width == 0 || height == 0 {
++            return false;
++        }
++        let scale = horizon_client::hud::HudBatch::new([width, height]).scale;
++        let (gui_x, gui_y) = (x as f32 / scale, y as f32 / scale);
++        let (gui_w, gui_h) = (
++            (width as f32 / scale).ceil(),
++            (height as f32 / scale).ceil(),
++        );
++        // The panel's own numbers, not a guess: `inventory_origin` (inventory_slots.rs)
++        // centres the menu's width and height and then slides it by the recipe book
++        // (recipe_book.rs:156, 77 units when it is open), and `screen_height` gives each
++        // station, chest, shulker and machine its real height. Creative is its own panel.
++        let (panel_w, panel_h, x0, y0) = if self.screen == Screen::Creative {
++            let (w, h) = (
++                horizon_client::creative::Creative::WIDTH,
++                horizon_client::creative::Creative::HEIGHT,
++            );
++            (w, h, (gui_w - w) * 0.5, (gui_h - h) * 0.5)
++        } else if self.screen == Screen::Inventory {
++            let w = self.native_screen_width().unwrap_or(176.0);
++            let h = self.screen_height();
++            (
++                w,
++                h,
++                (gui_w - w) * 0.5 + self.recipe_book_shift(gui_w),
++                (gui_h - h) * 0.5,
++            )
++        } else {
++            return false;
++        };
++        let outside =
++            gui_x < x0 || gui_x > x0 + panel_w || gui_y < y0 || gui_y > y0 + panel_h;
++        if !outside {
++            log::info!(
++                "Horizon: touch {gui_x:.0},{gui_y:.0} inside the panel {x0:.0},{y0:.0} {panel_w}x{panel_h}"
++            );
++            return false;
++        }
++        if self.carried.is_some() {
++            log::info!("Horizon: touch outside the inventory with a stack carried: not closing");
++            return false;
++        }
++        log::info!("Horizon: touch outside the inventory: closing");
++        self.ios_key(KeyCode::Escape, true);
++        self.ios_key(KeyCode::Escape, false);
++        true
++    }
++    /// A key, as the window's own key event delivers it: through the mapping, so sneak and
++    /// sprint reach their toggles. `keys.press` alone is undone on the next modifier sync
++    /// (`sync_toggle` writes the toggle's state over the key), which is why a sneak pressed
++    /// as a bare key never lasted a frame.
++    fn ios_key(&mut self, code: KeyCode, pressed: bool) {
++        if let Err(error) = self.mapped_key(code, pressed, false, code, Source::Agent) {
++            log::warn!("Horizon: touch key {code:?} pressed={pressed}: {error}");
++        }
++    }
++    /// A mouse button in the world.
++    fn ios_mouse(&mut self, button: MouseButton, pressed: bool) {
++        if self.screen != Screen::Playing {
++            return;
++        }
++        self.extras_mouse(button, pressed);
++        if let Err(error) = self.mouse_mapping(button, pressed, Source::Agent) {
++            log::warn!("Horizon: touch mouse {button:?}: {error}");
++        }
++    }
++    /// The look: the same accumulated motion a grabbed mouse makes.
++    fn ios_look(&mut self, dx: f64, dy: f64) {
++        if dx == 0.0 && dy == 0.0 {
++            return;
++        }
++        // A finger is a pointer the system never lets the game grab, which is
++        // the case `agent_pointer` already covers (`horizon-ctl mouse-move`):
++        // `apply_mouse_look` wants an active window, and iOS sends no focus
++        // event, so without this the motion would accumulate and be dropped.
++        {
++            let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++            state.pending = (
++                state.pending.0 + dx * LOOK_GAIN,
++                state.pending.1 + dy * LOOK_GAIN,
++            );
++        }
++        self.flush_look(0.5);
++        self.last_input = Instant::now();
++    }
++    /// Hand `part` of the drag the fingers have reported to the mouse. A
++    /// digitiser reports motion in bursts, and turning the view by a burst in
++    /// one frame is what the eye sees as the view jumping; half per frame
++    /// spreads a burst over two and the drag reads as one movement.
++    /// `add_motion`, not `on_move`: a finger has no position of its own as far
++    /// as the pointer is concerned, and reporting one would leave the mouse
++    /// where the finger last was, so the next click's `CursorMoved` would
++    /// arrive as a jump across the screen.
++    fn flush_look(&mut self, part: f64) {
++        let step = {
++            let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++            let step = (state.pending.0 * part, state.pending.1 * part);
++            state.pending = (state.pending.0 - step.0, state.pending.1 - step.1);
++            if state.pending.0.abs() < 0.01 && state.pending.1.abs() < 0.01 {
++                state.pending = (0.0, 0.0);
++            }
++            step
++        };
++        if step.0 == 0.0 && step.1 == 0.0 {
++            return;
++        }
++        // `agent_pointer`, not `captured`: the grab is the window's, and claiming it
++        // here would have `capture(false)` take the keys of a player who is walking.
++        self.agent_pointer = true;
++        self.mouse.add_motion(step.0, step.1);
++    }
++    /// Every key and button the controls are holding, let go of: a screen that takes the
++    /// keyboard away (the pause menu, the inventory) must not leave a jump held, or the
++    /// player hops for as long as the menu stays open and after it closes.
++    pub(super) fn ios_release_all(&mut self) {
++        let (held, stick) = {
++            let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++            if state.held.is_empty() && state.stick.is_none() && state.look.is_none() {
++                return;
++            }
++            let held = std::mem::take(&mut state.held);
++            let stick = state.stick.is_some() || state.knob != state.origin;
++            state.stick = None;
++            state.look = None;
++            state.slide = None;
++            state.drag = None;
++            state.pending = (0.0, 0.0);
++            state.knob = state.layout.as_ref().map_or((0.0, 0.0), |l| l.stick);
++            (held, stick)
++        };
++        if stick {
++            self.ios_stick(0.0, 0.0);
++        }
++        for (_, button) in held {
++            self.ios_button(button, false);
++        }
++        self.agent_pointer = false;
++    }
++    /// Everything one finger was holding or turning, let go of.
++    pub(super) fn ios_release(&mut self, id: u64) {
++        let (stick, button, look) = {
++            let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++            let stick = state.stick == Some(id);
++            if stick {
++                state.stick = None;
++                state.knob = state.layout.as_ref().map_or((0.0, 0.0), |l| l.stick);
++            }
++            let look = state.look == Some(id);
++            if look {
++                state.look = None;
++            }
++            if state.slide.is_some_and(|(finger, _, _)| finger == id) {
++                state.slide = None;
++            }
++            let button = state
++                .held
++                .iter()
++                .position(|(finger, _)| *finger == id)
++                .map(|index| state.held.remove(index).1);
++            (stick, button, look)
++        };
++        if stick {
++            self.ios_stick(0.0, 0.0);
++        }
++        if let Some(button) = button {
++            self.ios_button(button, false);
++            let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++            state
++                .latched
++                .push((button, std::time::Instant::now() + LATCH));
++        }
++        if look {
++            // The rest of the drag still turns the view, over the next frames.
++            let _ = self.flush_look(0.5);
++            self.agent_pointer = false;
++        }
++    }
++    /// The controls, over the HUD.
++    pub(super) fn draw_touch_controls(&mut self, batch: &mut horizon_client::hud::HudBatch) {
++        let atlas = &self.gui.atlas;
++        let (layout, knob, held) = {
++            let mut state = touch().lock().unwrap_or_else(|poison| poison.into_inner());
++            let Some(layout) = state.layout.clone() else {
++                return;
++            };
++            let now = std::time::Instant::now();
++            state.latched.retain(|(_, until)| *until > now);
++            let mut held: Vec<Button> = state.held.iter().map(|(_, button)| *button).collect();
++            held.extend(state.latched.iter().map(|(button, _)| *button));
++            let mut layout = layout;
++            layout.touch = state.mark;
++            layout.edit = state.edit;
++            layout.debug = state.debug || state.edit;
++            let knob = if layout.edit { layout.stick } else { state.knob };
++            (layout, knob, held)
++        };
++        touch_hud::paint(batch, atlas, &layout, knob, |button| held.contains(&button));
++        // Whatever the fingers reported since the last frame turns the view
++        // now, a share at a time, on the frame that reads it.
++        self.flush_look(0.5);
++    }
++}
+diff --git a/crates/horizon-client/src/game/window_handler.rs b/crates/horizon-client/src/game/window_handler.rs
+index daebd47..454f61d 100644
+--- a/crates/horizon-client/src/game/window_handler.rs
++++ b/crates/horizon-client/src/game/window_handler.rs
+@@ -327,6 +327,9 @@ impl ApplicationHandler for Game<'_> {
+             }
+         };
+         horizon_client::window::settle_created_fullscreen(&window, fullscreen);
++        // Every finger, not just the first: the stick and the view are two of them.
++        #[cfg(target_os = "ios")]
++        ios_multitouch::enable(&window);
+         #[cfg(target_os = "windows")]
+         if let Some(hwnd) = hwnd(&window) {
+             horizon_threads::system_menu::suppress(hwnd);
+@@ -351,13 +354,54 @@ impl ApplicationHandler for Game<'_> {
+         self.previous = Instant::now();
+     }
+     fn window_event(&mut self, event_loop: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
++        // A phone reports touches; while playing they are the on-screen controls,
++        // and every other screen turns them into the click the interface listens
++        // for (#ios). Logged, so a touch that goes missing leaves a trace.
++        #[cfg(all(target_os = "ios", feature = "ios-touch"))]
++        if let WindowEvent::Touch(touch) = &event {
++            let (id, phase, location) = (touch.id, touch.phase, touch.location);
++            // The title screen keeps `Screen::Playing` behind it, so it is not a
++            // place for the controls: there a tap has to stay a click.
++            let playing = self.screen == Screen::Playing && self.title.is_none();
++            // A finger that lifts is let go of whatever screen is open: the pause
++            // menu takes the controls away, and a press whose release is dropped
++            // leaves that key held — the jump, and the player hops until it is
++            // tapped again.
++            if matches!(phase, winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled) {
++                horizon_threads::big_stack::on_a_big_stack(|| {
++                    self.ios_release(id);
++                });
++            }
++            if !matches!(phase, winit::event::TouchPhase::Moved) {
++                log::info!("Horizon: touch {id} {phase:?} at {:.0},{:.0} playing={playing}", location.x, location.y);
++            }
++            if playing {
++                horizon_threads::big_stack::on_a_big_stack(|| {
++                    self.ios_touch(id, phase, location.x, location.y);
++                });
++                return;
++            }
++        }
+         // A phone reports touches; the game reads a cursor position and the left button, so a
+         // touch becomes that pointer: the same finger that moves presses and releases (#ios).
+-        // Further fingers are ignored until the interface has something to do with them.
++        // The on-screen controls are a virtual controller of their own, so a touch is always
++        // a click here, in a menu and in the world alike.
+         #[cfg(target_os = "ios")]
+         if let WindowEvent::Touch(touch) = &event {
+             let device_id = touch.device_id;
+             let phase = touch.phase;
++            // The software keyboard covers the screen's own buttons, so a tap
++            // away from the field it was opened for puts it away.
++            if matches!(phase, winit::event::TouchPhase::Started) {
++                self.ios_tap(touch.location.x, touch.location.y);
++                // A container screen has no Escape key on a phone: a tap beside its panel
++                // closes it, and that tap is then not a click as well.
++                if horizon_threads::big_stack::on_a_big_stack(|| {
++                    self.ios_container_tap(touch.location.x, touch.location.y)
++                }) {
++                    return;
++                }
++            }
+             let mut pointer = vec![WindowEvent::CursorMoved {
+                 device_id,
+                 position: touch.location,
+@@ -435,6 +479,12 @@ impl ApplicationHandler for Game<'_> {
+         }
+     }
+     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
++        // A screen that takes the keyboard away while a finger is still down would keep
++        // that key held (jump hops for as long as the menu is open): let everything go.
++        #[cfg(all(target_os = "ios", feature = "ios-touch"))]
++        if self.screen != Screen::Playing || self.title.is_some() {
++            self.ios_release_all();
++        }
+         // iOS: a frame compiles shaders the first time it needs them, and naga parses WGSL
+         // with one stack frame per nesting level; the main thread has 1 MB and a menu frame
+         // that builds its blur pipeline ran out of it (#ios). The whole callback runs on the
+diff --git a/crates/horizon-threads/Cargo.toml b/crates/horizon-threads/Cargo.toml
+index 879d443..15c0bb1 100644
+--- a/crates/horizon-threads/Cargo.toml
++++ b/crates/horizon-threads/Cargo.toml
+@@ -18,6 +18,9 @@ stacker = "0.1"
+ [target.'cfg(any(target_vendor = "apple", target_os = "linux", target_os = "android"))'.dependencies]
+ libc = "0.2"
+ 
++[target.'cfg(target_os = "ios")'.dependencies]
++objc2 = "0.6"
++
+ [target.'cfg(target_os = "linux")'.dependencies]
+ framehop = { version = "0.16", default-features = false, features = ["std"] }
+ object = { version = "0.39", default-features = false, features = ["read_core", "elf", "std"] }
+diff --git a/crates/horizon-threads/src/ios_multitouch.rs b/crates/horizon-threads/src/ios_multitouch.rs
+new file mode 100644
+index 0000000..352bf68
+--- /dev/null
++++ b/crates/horizon-threads/src/ios_multitouch.rs
+@@ -0,0 +1,25 @@
++//! More than one finger at a time on a touch screen: the OS call the other crates, which
++//! forbid unsafe code, cannot make themselves.
++//!
++//! `UIView.multipleTouchEnabled` is off by default, and the view winit makes for its iOS
++//! window leaves it that way: the first finger down owns the view's touches and a second one
++//! is never delivered. Someone holding the stick and turning the view with another finger
++//! then loses the stick the moment the second finger lands, which reads as the player
++//! stopping while the view turns.
++//!
++//! It is one flag on the view, so it is set here rather than in a patch to winit.
++
++/// Let the window's view report every finger. `view` is the `UIView` behind the window: a
++/// `winit` iOS window's `RawWindowHandle::UiKit(...).ui_view`.
++///
++/// Safe to call with any pointer, as a message to an object that is not live is the call this
++/// crate exists to make and not a use of the pointer after free: the caller passes the view of
++/// a window it holds.
++pub fn set_multiple_touch_enabled(view: *mut core::ffi::c_void) {
++    // SAFETY: `view` is the `UIView` of a window the caller holds; messaging it cannot outlive
++    // the window it belongs to.
++    let view: *mut objc2::runtime::AnyObject = view.cast();
++    unsafe {
++        let _: () = objc2::msg_send![view, setMultipleTouchEnabled: true];
++    }
++}
+diff --git a/crates/horizon-threads/src/lib.rs b/crates/horizon-threads/src/lib.rs
+index 6a4efcb..63fc0f9 100644
+--- a/crates/horizon-threads/src/lib.rs
++++ b/crates/horizon-threads/src/lib.rs
+@@ -8,6 +8,9 @@ pub mod allocator_stats;
+ #[cfg(target_os = "windows")]
+ pub mod boot_paint;
+ pub mod heap_census;
++/// Every finger, not just the first: the flag UIKit leaves off on winit's iOS view.
++#[cfg(target_os = "ios")]
++pub mod ios_multitouch;
+ #[cfg(target_os = "linux")]
+ pub mod heap_sample;
+ pub mod jobs;

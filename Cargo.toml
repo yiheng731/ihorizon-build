@@ -1,0 +1,15 @@
+# Standalone workspace so `make check` works without cloning Horizon.
+#
+# When you drop crates/horizon-ios-shell into the real Horizon workspace, delete
+# this file and add "crates/horizon-ios-shell" to Horizon's [workspace] members
+# instead — one wgpu version, one lockfile, no duplicate links.
+[workspace]
+resolver = "3"
+members = ["crates/horizon-ios-shell"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = "debuginfo"

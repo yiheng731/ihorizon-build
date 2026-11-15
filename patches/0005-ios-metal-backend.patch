@@ -1,0 +1,16 @@
+diff --git a/crates/horizon-client-render/src/gfx.rs b/crates/horizon-client-render/src/gfx.rs
+index 2eb5f97..cf25de7 100644
+--- a/crates/horizon-client-render/src/gfx.rs
++++ b/crates/horizon-client-render/src/gfx.rs
+@@ -1995,7 +1995,10 @@ fn backend_order(
+     wgpu_backend: bool,
+ ) -> Vec<wgpu::Backends> {
+     use wgpu::Backends;
+-    if os == "macos" || wgpu_backend {
++    // iOS presents through Metal alone: wgpu is built for this platform with that backend
++    // only, so the desktop order below would spend a try on Vulkan and another on OpenGL,
++    // neither of which has a driver on a phone, and give up with a window that never draws.
++    if os == "macos" || os == "ios" || wgpu_backend {
+         return vec![Backends::default()];
+     }
+     let windows = os == "windows";

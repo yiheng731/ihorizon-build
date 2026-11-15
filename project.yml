@@ -1,0 +1,68 @@
+# XcodeGen spec. `xcodegen generate` produces Horizon.xcodeproj.
+#
+# Why a spec instead of a checked-in .pbxproj: the Rust static library path, the
+# bridging header and the linker flags are the parts that actually break, and
+# they are three readable lines here instead of three opaque GUID blocks.
+name: Horizon
+
+options:
+  bundleIdPrefix: dev.horizon
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+    ENABLE_USER_SCRIPT_SANDBOXING: NO
+    CLANG_ENABLE_MODULES: YES
+    # Rust release build of libhorizon_ios_shell.a (see scripts/build_ipa.sh).
+    LIBRARY_SEARCH_PATHS: $(SRCROOT)/target/aarch64-apple-ios/release
+    HEADER_SEARCH_PATHS: $(SRCROOT)/crates/horizon-ios-shell/include
+    OTHER_LDFLAGS:
+      - -lhorizon_ios_shell
+      - -framework
+      - Metal
+      - -framework
+      - QuartzCore
+      - -framework
+      - UIKit
+      - -framework
+      - CoreGraphics
+      - -framework
+      - Foundation
+      - -framework
+      - CoreFoundation
+      - -framework
+      - IOSurface
+      - -framework
+      - CoreVideo
+      - -lz
+    # Rust static lib is fat-free: one arch per build.
+    ARCHS: arm64
+    ONLY_ACTIVE_ARCH: NO
+    VALIDATE_WORKSPACE: NO
+
+targets:
+  Horizon:
+    type: application
+    platform: iOS
+    sources:
+      - path: ios/Horizon
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.horizon.client
+        PRODUCT_NAME: Horizon
+        INFOPLIST_FILE: ios/Horizon/Info.plist
+        SWIFT_OBJC_BRIDGING_HEADER: ios/Horizon/Horizon-Bridging-Header.h
+        TARGETED_DEVICE_FAMILY: "1,2"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: ""
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        GCC_OPTIMIZATION_LEVEL: s
+        SWIFT_OPTIMIZATION_LEVEL: -O

@@ -1,0 +1,11 @@
+# 换行统一：让 .sh 在 macOS runner 上不会被 CRLF 打死
+# （否则 CI 报 /usr/bin/env: 'bash\r': No such file or directory）
+* text=auto eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.swift text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.ps1 text eol=crlf
+*.ipa binary
+*.a binary

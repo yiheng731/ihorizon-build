@@ -1,0 +1,16 @@
+build/
+target/
+.local/
+Horizon.xcodeproj/
+*.xcuserstate
+xcuserdata/
+DerivedData/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+upstream-horizon/
+*.log
+
+# 本地 GitHub 令牌（绝不入库）
+token.txt
