@@ -133,15 +133,14 @@ def package_existing(app: Path, out: Path) -> int:
     return 0
 
 def main() -> int:
-    args = parser.parse_args()
-    if args.app:
-        return package_existing(args.app, args.out)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, help="the release executable, for a hand built bundle")
     parser.add_argument("--app", type=Path, help="an .app xcodebuild already produced")
     parser.add_argument("--out", type=Path, default=Path("dist/ihorizon-client-unsigned.ipa"))
     parser.add_argument("--keep", action="store_true", help="leave the assembled .app in build/")
     args = parser.parse_args()
+    if args.app:
+        return package_existing(args.app, args.out)
 
     if not args.binary.is_file():
         print(f"✗ 找不到可执行文件：{args.binary}", file=sys.stderr)
