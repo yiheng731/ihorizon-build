@@ -109,9 +109,37 @@ def write_icons(app: Path) -> bool:
         source.resize((size, size), Image.LANCZOS).save(app / name)
     return True
 
+def package_existing(app: Path, out: Path) -> int:
+    """Wraps an .app that xcodebuild built into the layout an ipa needs."""
+    if not app.is_dir():
+        print(f"::error::no app at {app}")
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    stage = out.parent / "Payload"
+    if stage.exists():
+        shutil.rmtree(stage)
+    stage.mkdir(parents=True)
+    target = stage / app.name
+    shutil.copytree(app, target)
+    if not (target / EXECUTABLE_NAME).is_file():
+        print(f"::error::{app.name} has no {EXECUTABLE_NAME}")
+        return 1
+    if out.exists():
+        out.unlink()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as ipa:
+        for path in sorted(stage.rglob("*")):
+            ipa.write(path, path.relative_to(out.parent))
+    print(f"wrote {out} ({out.stat().st_size} bytes)")
+    return 0
+
+
 def main() -> int:
+    args = parser.parse_args()
+    if args.app:
+        return package_existing(args.app, args.out)
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--binary", required=True, type=Path, help="the release executable")
+    parser.add_argument("--binary", type=Path, help="the release executable, for a hand built bundle")
+    parser.add_argument("--app", type=Path, help="an .app xcodebuild already produced")
     parser.add_argument("--out", type=Path, default=Path("dist/ihorizon-client-unsigned.ipa"))
     parser.add_argument("--keep", action="store_true", help="leave the assembled .app in build/")
     args = parser.parse_args()

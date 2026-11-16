@@ -144,18 +144,33 @@ jobs:
           workspaces: upstream-horizon -> target
           key: ios-client
 
-      - name: Build the executable
+      - name: Build the static library
         working-directory: upstream-horizon
         run: |
           set -o pipefail
           cargo build --release --target aarch64-apple-ios -p horizon-client-ios \
             --features horizon-client/ios-touch 2>&1 | tail -40
-          ls -l target/aarch64-apple-ios/release/horizon-client-ios
+          ls -l target/aarch64-apple-ios/release/libhorizon_client_ios.a
+          ln -sfn "$PWD/target" "$GITHUB_WORKSPACE/target"
+
+      - name: Xcode project
+        run: |
+          brew install xcodegen || true
+          xcodegen generate
+
+      - name: Build the app
+        run: |
+          set -o pipefail
+          xcodebuild -project Horizon.xcodeproj -scheme Horizon -configuration Release \
+            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tail -60
+          find build -maxdepth 6 -name '*.app' | head
 
       - name: Assemble the ipa
         run: |
           python3 scripts/make_client_ipa.py \
-            --binary upstream-horizon/target/aarch64-apple-ios/release/horizon-client-ios \
+            --app "$(find build -maxdepth 6 -name 'ihorizon.app' | head -1)" \
             --out dist/ihorizon-client-unsigned.ipa
           unzip -l dist/ihorizon-client-unsigned.ipa
 
