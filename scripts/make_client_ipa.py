@@ -23,7 +23,7 @@ from pathlib import Path
 
 BUNDLE_NAME = "ihorizon"
 BUNDLE_ID = "dev.horizon.client"
-VERSION = "1.0"
+VERSION = "1.1"
 MINIMUM_OS = "15.0"
 EXECUTABLE_NAME = "ihorizon"
 
