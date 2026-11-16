@@ -60,7 +60,7 @@ targets:
     type: application
     platform: iOS
     sources:
-      - path: Horizon
+      - path: ios/Horizon
     settings:
       base:
         PRODUCT_NAME: ihorizon

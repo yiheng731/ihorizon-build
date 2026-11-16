@@ -140,7 +140,8 @@ jobs:
       - name: Xcode project
         run: |
           brew install xcodegen || true
-          xcodegen generate
+          xcodegen generate 2>&1 | tee xcodegen.log
+          test -f Horizon.xcodeproj/project.pbxproj
 
       - name: Build the app
         run: |
