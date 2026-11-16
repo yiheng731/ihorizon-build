@@ -1,6 +1,5 @@
 import UIKit
 
-/// 启动页：游戏已经在下面跑起来，这一层盖在上面。
 final class Launcher: UIViewController {
 
     private static var window: UIWindow?

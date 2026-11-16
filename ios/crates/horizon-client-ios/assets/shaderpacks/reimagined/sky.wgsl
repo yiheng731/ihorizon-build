@@ -1,7 +1,3 @@
-// Reimagined's sky: a three-stop vertical gradient (up / middle / down) built from vanilla's
-// sky colour, a sunset band mixed in near the horizon, and a lit ground beyond it.
-// Ported from lib/colors/skyColors.glsl and lib/atmospherics/sky.glsl (GetSky).
-
 override sky_brightness: f32 = 1.0;
 override sunset_strength: f32 = 1.0;
 override night_brightness: f32 = 1.0;
@@ -17,13 +13,11 @@ fn sky(input: SkyInput) -> vec4<f32> {
     let low = sun_low();
     let night = night_factor();
 
-    // Vanilla's sky colour, kept above black in rain (Reimagined's skyColorM / skyColorM2).
     let sky_colour = max(input.color.rgb, vec3<f32>(0.0));
     let sky_sqrt = sqrt(sky_colour);
     let sky_m = mix(max(sky_sqrt, vec3<f32>(0.63, 0.67, 0.73) * ir), sky_sqrt, ir * ir);
     let sky_m2 = mix(max(sky_colour, vec3<f32>(0.265, 0.295, 0.35) * day), sky_colour, ir * ir);
 
-    // Noon, then the sunset palette, mixed by how low the sun is.
     let noon_up = sky_m * sky_m * sky_m * vec3<f32>(0.85, 0.92, 0.81);
     let noon_middle = sky_m * vec3<f32>(1.4, 1.3, 1.3) + noon_up * 0.25;
     let noon_down = sky_m * vec3<f32>(0.9) + noon_up * 0.25;
@@ -37,7 +31,6 @@ fn sky(input: SkyInput) -> vec4<f32> {
     let day_middle = mix(noon_middle, sunset_middle, low);
     let day_down = mix(noon_down, sunset_down, low);
 
-    // Night keeps a blue cast and a brighter horizon, as Reimagined's does.
     let night_base = 0.9 * vec3<f32>(0.07, 0.14, 0.24) * (1.0 - 0.5 * rain) + sky_colour;
     let night_up = sqrt(night_base) * 0.45 * night_brightness;
     let night_middle = sqrt(night_up) * 0.65;
@@ -47,20 +40,17 @@ fn sky(input: SkyInput) -> vec4<f32> {
     let middle_colour = mix(night_middle, day_middle, day);
     let down_colour = mix(night_down, day_down, day);
 
-    // The gradient: up at the zenith, middle toward the horizon.
     let above = max(up, 0.0);
     var blend = sq(1.0 - above);
     blend = pow(blend, (1.0 - 0.4 * sq(low)) * (1.15 - 0.15 * rain * rain));
     blend = mix(blend, 1.0, rain * rain * 0.15);
     var colour = mix(up_colour, middle_colour, blend);
 
-    // The sunset band, tight around the horizon.
     var band = sq(1.0 - abs(up));
     band = band * band * (3.0 - 2.0 * band);
     band *= (0.7 - 0.4 * night + sq(day)) * low * day * sunset_strength;
     colour = mix(colour, sunset_band, sat(band) * ir);
 
-    // Ground below the horizon: its own colour, with the band's light bleeding down.
     var ground = sat((-up + 0.08) / 0.35);
     ground = smoothstep1(ground);
     let ground_mix = mix(vec3<f32>(ground), vec3<f32>(ground * ground, sqrt(ground), ground), 0.75 - 0.5 * rain);

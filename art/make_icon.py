@@ -26,7 +26,6 @@ BG_BOTTOM = (6, 2, 12)
 GRID = (150, 96, 240)
 HORIZON = (196, 132, 255)
 
-
 def bezier(p0, p1, p2, p3, steps=110):
     out = []
     for i in range(steps + 1):
@@ -37,12 +36,10 @@ def bezier(p0, p1, p2, p3, steps=110):
         out.append((x, y))
     return out
 
-
 def stroke(draw, points, width_at):
     for i, (x, y) in enumerate(points):
         r = max(width_at(i / max(len(points) - 1, 1)) * 0.5, 0.6)
         draw.ellipse((x - r, y - r, x + r, y + r), fill=255)
-
 
 def nib(entry: float, peak: float, exit_: float, scale: float):
     def at(t):
@@ -55,7 +52,6 @@ def nib(entry: float, peak: float, exit_: float, scale: float):
         return w * 1.18 * UNIT * scale
 
     return at
-
 
 def build(scale: float):
     layer = Image.new("L", (CANVAS, CANVAS), 0)
@@ -89,7 +85,6 @@ def build(scale: float):
     draw.ellipse((cx - rx, cy - ry, cx + rx, cy + ry), fill=255)
     return layer
 
-
 def coloured(mask: Image.Image, top, bottom):
     w, h = mask.size
     grad = Image.new("RGBA", (w, h))
@@ -104,7 +99,6 @@ def coloured(mask: Image.Image, top, bottom):
     out = grad.copy()
     out.putalpha(mask)
     return out
-
 
 def backdrop() -> Image.Image:
     img = Image.new("RGBA", (SIZE, SIZE), (0, 0, 0, 255))
@@ -164,7 +158,6 @@ def backdrop() -> Image.Image:
     dark.putalpha(vign.point(lambda v: round((255 - v) * 0.92)))
     return Image.alpha_composite(img, dark)
 
-
 def main() -> int:
     out = backdrop()
 
@@ -189,7 +182,6 @@ def main() -> int:
     out.resize((180, 180), Image.LANCZOS).save(HERE / "icon-horizon-180.png")
     print("wrote", OUT)
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

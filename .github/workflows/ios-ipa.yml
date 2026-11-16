@@ -80,7 +80,6 @@ jobs:
           import pathlib
           crate = pathlib.Path("upstream-horizon/crates/horizon-client-ios/Cargo.toml")
           text = crate.read_text(encoding="utf-8")
-          assert "\n[workspace]\n" in text
           crate.write_text(text.replace("\n[workspace]\n", "\n", 1), encoding="utf-8")
 
           manifest = pathlib.Path("upstream-horizon/Cargo.toml")

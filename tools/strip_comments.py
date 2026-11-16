@@ -24,7 +24,6 @@ C_LIKE = {".h", ".swift"}
 MAKE = {"Makefile"}
 PATCH = {".patch"}
 
-
 def strip_rust(text: str) -> str:
     out: list[str] = []
     i, n = 0, len(text)
@@ -65,7 +64,6 @@ def strip_rust(text: str) -> str:
         i += 1
     return "".join(out)
 
-
 def strip_python(text: str) -> str:
     try:
         tokens = list(tokenize.generate_tokens(io.StringIO(text).readline))
@@ -82,7 +80,6 @@ def strip_python(text: str) -> str:
             lines[row - 1] = line[:col].rstrip() + ("\n" if line.endswith("\n") else "")
     return "".join(lines)
 
-
 def strip_hash(text: str) -> str:
     out = []
     for line in text.splitlines(keepends=True):
@@ -93,10 +90,8 @@ def strip_hash(text: str) -> str:
             out.append(line)
     return "".join(out)
 
-
 def strip_c_like(text: str) -> str:
     return strip_rust(text)
-
 
 def strip_make(text: str) -> str:
     out = []
@@ -106,7 +101,6 @@ def strip_make(text: str) -> str:
         else:
             out.append(line)
     return "".join(out)
-
 
 def strip_patch(text: str) -> str:
     """Drop comment-only lines that a hunk adds, renumbering its line counts."""
@@ -145,7 +139,6 @@ def strip_patch(text: str) -> str:
         out.extend(kept)
     return "".join(out)
 
-
 HANDLERS = {
     **{e: strip_rust for e in RS},
     **{e: strip_python for e in PY},
@@ -154,7 +147,6 @@ HANDLERS = {
     **{e: strip_make for e in MAKE},
     **{e: strip_patch for e in PATCH},
 }
-
 
 def targets() -> list[Path]:
     files = subprocess.run(
@@ -166,7 +158,6 @@ def targets() -> list[Path]:
         if path.suffix in HANDLERS or path.name in HANDLERS:
             picked.append(path)
     return picked
-
 
 def main() -> int:
     ap = argparse.ArgumentParser()
@@ -193,7 +184,6 @@ def main() -> int:
             path.write_text(after, encoding="utf-8", newline="\n")
     print(f"{changed} file(s)")
     return 0
-
 
 if __name__ == "__main__":
     sys.exit(main())

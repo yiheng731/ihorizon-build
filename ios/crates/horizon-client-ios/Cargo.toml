@@ -5,9 +5,16 @@ edition = "2024"
 publish = false
 description = "Horizon's own client, started by UIKit instead of a shell: the ipa's executable."
 
-[workspace]
+[lib]
+name = "horizon_client_ios"
+crate-type = ["staticlib", "rlib"]
+
+[[bin]]
+name = "horizon-client-ios"
+path = "src/main.rs"
 
 [dependencies]
+horizon-threads = { path = "../horizon-threads" }
 horizon-client = { path = "../horizon-client" }
 zip = { version = "9.1.3", default-features = false, features = ["deflate"] }
 [target.'cfg(target_os = "ios")'.dependencies]

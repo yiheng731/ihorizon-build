@@ -132,7 +132,6 @@ def package_existing(app: Path, out: Path) -> int:
     print(f"wrote {out} ({out.stat().st_size} bytes)")
     return 0
 
-
 def main() -> int:
     args = parser.parse_args()
     if args.app:
