@@ -20,4 +20,6 @@ NotificationCenter.default.addObserver(
     Launcher.present()
 }
 
+MicrosoftAuth.writeSessionFile(MicrosoftAuth.load())
+
 hz_run()

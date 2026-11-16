@@ -5,6 +5,12 @@ final class Launcher: UIViewController {
     private static var window: UIWindow?
     private static let accent = UIColor(red: 0.769, green: 0.522, blue: 1.0, alpha: 1)
 
+    private var avatarView = UIImageView()
+    private var avatarMark = UILabel()
+    private var nameLabel = UILabel()
+    private var statusLabel = UILabel()
+    private var account: Account?
+
     static func present() {
         guard window == nil else { return }
         guard let scene = UIApplication.shared.connectedScenes
@@ -40,6 +46,8 @@ final class Launcher: UIViewController {
         gradient.endPoint = CGPoint(x: 0.9, y: 1)
         view.layer.addSublayer(gradient)
         backdrop = gradient
+
+        account = MicrosoftAuth.load()
 
         let left = UIStackView()
         left.axis = .vertical
@@ -114,6 +122,8 @@ final class Launcher: UIViewController {
             footer.bottomAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -12),
         ])
+
+        applyAccount()
     }
 
     override func viewDidLayoutSubviews() {
@@ -122,55 +132,126 @@ final class Launcher: UIViewController {
     }
 
     private func accountCard() -> UIView {
-        let card = UIView()
+        let card = UIControl()
         card.backgroundColor = UIColor(white: 1, alpha: 0.06)
         card.layer.cornerRadius = 16
         card.layer.cornerCurve = .continuous
+        card.addTarget(self, action: #selector(accountTapped), for: .touchUpInside)
 
-        let avatar = UIView()
-        avatar.backgroundColor = Launcher.accent.withAlphaComponent(0.24)
-        avatar.layer.cornerRadius = 22
-        avatar.translatesAutoresizingMaskIntoConstraints = false
+        avatarView.backgroundColor = Launcher.accent.withAlphaComponent(0.24)
+        avatarView.layer.cornerRadius = 22
+        avatarView.clipsToBounds = true
+        avatarView.contentMode = .scaleAspectFill
+        avatarView.translatesAutoresizingMaskIntoConstraints = false
 
-        let mark = UILabel()
-        mark.text = "i"
-        mark.font = .systemFont(ofSize: 24, weight: .black)
-        mark.textColor = Launcher.accent
-        mark.translatesAutoresizingMaskIntoConstraints = false
-        avatar.addSubview(mark)
+        avatarMark.text = "i"
+        avatarMark.font = .systemFont(ofSize: 24, weight: .black)
+        avatarMark.textColor = Launcher.accent
+        avatarMark.textAlignment = .center
+        avatarMark.translatesAutoresizingMaskIntoConstraints = false
+        avatarView.addSubview(avatarMark)
 
-        let name = UILabel()
-        name.text = "本地玩家"
-        name.font = .systemFont(ofSize: 16, weight: .semibold)
-        name.textColor = .white
+        nameLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        nameLabel.textColor = .white
+        statusLabel.font = .systemFont(ofSize: 11)
+        statusLabel.textColor = UIColor(white: 1, alpha: 0.45)
 
-        let status = UILabel()
-        status.text = "未登录 · 单人游戏可用"
-        status.font = .systemFont(ofSize: 11)
-        status.textColor = UIColor(white: 1, alpha: 0.45)
-
-        let lines = UIStackView(arrangedSubviews: [name, status])
+        let lines = UIStackView(arrangedSubviews: [nameLabel, statusLabel])
         lines.axis = .vertical
         lines.spacing = 2
+        lines.isUserInteractionEnabled = false
 
-        let row = UIStackView(arrangedSubviews: [avatar, lines])
+        let row = UIStackView(arrangedSubviews: [avatarView, lines])
         row.axis = .horizontal
         row.alignment = .center
         row.spacing = 12
+        row.isUserInteractionEnabled = false
         row.translatesAutoresizingMaskIntoConstraints = false
         card.addSubview(row)
 
         NSLayoutConstraint.activate([
-            avatar.widthAnchor.constraint(equalToConstant: 44),
-            avatar.heightAnchor.constraint(equalToConstant: 44),
-            mark.centerXAnchor.constraint(equalTo: avatar.centerXAnchor),
-            mark.centerYAnchor.constraint(equalTo: avatar.centerYAnchor),
+            avatarView.widthAnchor.constraint(equalToConstant: 44),
+            avatarView.heightAnchor.constraint(equalToConstant: 44),
+            avatarMark.centerXAnchor.constraint(equalTo: avatarView.centerXAnchor),
+            avatarMark.centerYAnchor.constraint(equalTo: avatarView.centerYAnchor),
             row.topAnchor.constraint(equalTo: card.topAnchor, constant: 13),
             row.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -13),
             row.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 14),
             row.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
         ])
         return card
+    }
+
+    private func applyAccount() {
+        if let account {
+            nameLabel.text = account.name
+            statusLabel.text = "已登录 · 多人游戏可用"
+            statusLabel.textColor = UIColor(red: 0.55, green: 0.92, blue: 0.66, alpha: 1)
+            avatarMark.isHidden = true
+            loadAvatar(account.uuid)
+        } else {
+            nameLabel.text = "本地玩家"
+            statusLabel.text = "未登录 · 单人游戏可用"
+            statusLabel.textColor = UIColor(white: 1, alpha: 0.45)
+            avatarView.image = nil
+            avatarMark.isHidden = false
+        }
+    }
+
+    private func loadAvatar(_ uuid: String) {
+        guard let url = MicrosoftAuth.avatarURL(uuid) else { return }
+        URLSession.shared.dataTask(with: url) { [weak self] data, _, _ in
+            guard let data, let image = UIImage(data: data) else { return }
+            DispatchQueue.main.async { self?.avatarView.image = image }
+        }.resume()
+    }
+
+    @objc private func accountTapped() {
+        guard account != nil else {
+            startSignIn()
+            return
+        }
+        let sheet = UIAlertController(title: nil, message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "退出登录", style: .destructive) { [weak self] _ in
+            MicrosoftAuth.signOut()
+            self?.account = nil
+            self?.applyAccount()
+        })
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = view.bounds
+        }
+        present(sheet, animated: true)
+    }
+
+    private func startSignIn() {
+        let progress = UIAlertController(
+            title: "登录 Microsoft",
+            message: "正在申请登录代码…",
+            preferredStyle: .alert)
+        progress.addAction(UIAlertAction(title: "取消", style: .cancel))
+        present(progress, animated: true)
+        Task { @MainActor in
+            do {
+                let account = try await MicrosoftAuth.signIn { [weak progress] message in
+                    progress?.message = message
+                }
+                progress.dismiss(animated: true) { [weak self] in
+                    self?.account = account
+                    self?.applyAccount()
+                }
+            } catch {
+                progress.dismiss(animated: true) { [weak self] in
+                    let alert = UIAlertController(
+                        title: "登录没有完成",
+                        message: error.localizedDescription,
+                        preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "好", style: .default))
+                    self?.present(alert, animated: true)
+                }
+            }
+        }
     }
 
     private func primary(_ title: String, symbol: String, action: @escaping () -> Void) -> UIButton {

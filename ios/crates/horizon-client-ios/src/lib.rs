@@ -168,6 +168,12 @@ pub extern "C" fn hz_run() {
         "--render-distance".into(),
         std::env::var("HORIZON_RENDER_DISTANCE").unwrap_or_else(|_| "6".into()),
     ];
+    let session = documents.join("session.json");
+    if session.is_file() {
+        args.push("--session-file".into());
+        args.push(session.display().to_string());
+        log("handing the signed-in account to the client");
+    }
     if resources.join(RESOURCES_MANIFEST).is_file() {
         args.push("--resources".into());
         args.push(resources.display().to_string());
