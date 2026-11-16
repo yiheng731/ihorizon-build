@@ -10023,7 +10023,7 @@ index b2b40f7a1e..4f06fef694 100644
      #[cfg(unix)]
      {
 diff --git a/crates/horizon-client/src/game.rs b/crates/horizon-client/src/game.rs
-index bbc296de44..705de478e0 100644
+index bbc296de44..2fc0bae417 100644
 --- a/crates/horizon-client/src/game.rs
 +++ b/crates/horizon-client/src/game.rs
 @@ -1,11 +1,11 @@
@@ -16501,9 +16501,24 @@ index bbc296de44..705de478e0 100644
          if let WindowEvent::KeyboardInput {
              event: key_event, ..
          } = &event
-@@ -9860,13 +9874,23 @@ impl Game<'_> {
+@@ -9859,14 +9873,38 @@ impl Game<'_> {
+             && matches!(key_event.physical_key, PhysicalKey::Unidentified(_))
              && let Some(text) = key_event.text.as_deref()
          {
++            if text.contains('\n') || text.contains('\r') {
++                for pressed in [true, false] {
++                    if let Err(error) = self.mapped_key(
++                        KeyCode::Enter,
++                        pressed,
++                        false,
++                        KeyCode::Enter,
++                        Source::Agent,
++                    ) {
++                        log::warn!("Horizon: typed return: {error}");
++                    }
++                }
++                return;
++            }
              let text: String = text.chars().filter(|c| !c.is_control()).collect();
 +            
 +            
@@ -16527,7 +16542,7 @@ index bbc296de44..705de478e0 100644
          if let WindowEvent::KeyboardInput { event, .. } = &event
              && event.state == ElementState::Pressed
              && !event.repeat
-@@ -9892,9 +9916,9 @@ impl Game<'_> {
+@@ -9892,9 +9930,9 @@ impl Game<'_> {
              }
              return;
          }
@@ -16540,7 +16555,7 @@ index bbc296de44..705de478e0 100644
          if let WindowEvent::KeyboardInput { event, .. } = &event
              && event.state == ElementState::Pressed
              && let PhysicalKey::Code(key) = event.physical_key
-@@ -9904,7 +9928,7 @@ impl Game<'_> {
+@@ -9904,7 +9942,7 @@ impl Game<'_> {
                  return;
              }
          }
@@ -16549,7 +16564,7 @@ index bbc296de44..705de478e0 100644
          if let WindowEvent::KeyboardInput {
              event: key_event, ..
          } = &event
-@@ -9920,8 +9944,8 @@ impl Game<'_> {
+@@ -9920,8 +9958,8 @@ impl Game<'_> {
                  return;
              }
          }
@@ -16560,7 +16575,7 @@ index bbc296de44..705de478e0 100644
          if let WindowEvent::KeyboardInput { event, .. } = &event {
              self.narrator_hotkey(event);
          }
-@@ -9942,15 +9966,15 @@ impl Game<'_> {
+@@ -9942,15 +9980,15 @@ impl Game<'_> {
          {
              self.reassert_pointer_capture();
          }
@@ -16581,7 +16596,7 @@ index bbc296de44..705de478e0 100644
          if let Some(starting) = &self.integrated_starting
              && starting.handle.upgrade().is_file_fixing()
          {
-@@ -9999,8 +10023,8 @@ impl Game<'_> {
+@@ -9999,8 +10037,8 @@ impl Game<'_> {
          {
              return;
          }
@@ -16592,7 +16607,7 @@ index bbc296de44..705de478e0 100644
          if self.pack_reload.is_some()
              && !matches!(
                  &event,
-@@ -10046,23 +10070,23 @@ impl Game<'_> {
+@@ -10046,23 +10084,23 @@ impl Game<'_> {
              }
              return;
          }
@@ -16633,7 +16648,7 @@ index bbc296de44..705de478e0 100644
          let mut typed: Option<String> = None;
          if let WindowEvent::KeyboardInput {
              event: key_event, ..
-@@ -10080,8 +10104,8 @@ impl Game<'_> {
+@@ -10080,8 +10118,8 @@ impl Game<'_> {
                  PhysicalKey::Unidentified(_) => false,
              };
              if self.screen == Screen::Options && self.screen_hooks_open() {
@@ -16644,7 +16659,7 @@ index bbc296de44..705de478e0 100644
                  if let Some(text) = key_event.text.as_deref() {
                      let left = self.screen_text_typed(text);
                      if left.as_deref() != Some(text) {
-@@ -10089,8 +10113,8 @@ impl Game<'_> {
+@@ -10089,8 +10127,8 @@ impl Game<'_> {
                      }
                  }
              }
@@ -16655,7 +16670,7 @@ index bbc296de44..705de478e0 100644
              if !canceled
                  && control::title_owns_text(&self.screen, self.title.is_some())
                  && self.types_text()
-@@ -10103,9 +10127,9 @@ impl Game<'_> {
+@@ -10103,9 +10141,9 @@ impl Game<'_> {
                  key_event.text = None;
              }
              if canceled {
@@ -16668,7 +16683,7 @@ index bbc296de44..705de478e0 100644
                  if let Some(text) = typed.as_deref() {
                      self.screen_chars_typed(Some(text));
                  } else if self.screen == Screen::Options
-@@ -10114,15 +10138,15 @@ impl Game<'_> {
+@@ -10114,15 +10152,15 @@ impl Game<'_> {
                  {
                      let text: String = text.chars().filter(|c| !c.is_control()).collect();
                      if !text.is_empty() {
@@ -16687,7 +16702,7 @@ index bbc296de44..705de478e0 100644
          if let WindowEvent::KeyboardInput {
              event: key_event, ..
          } = &event
-@@ -10130,8 +10154,8 @@ impl Game<'_> {
+@@ -10130,8 +10168,8 @@ impl Game<'_> {
              && let PhysicalKey::Code(key) = key_event.physical_key
              && self.key_focus_key(event_loop, key)
          {
@@ -16698,7 +16713,7 @@ index bbc296de44..705de478e0 100644
              self.screen_chars_typed(typed.as_deref());
              return;
          }
-@@ -10141,7 +10165,7 @@ impl Game<'_> {
+@@ -10141,7 +10179,7 @@ impl Game<'_> {
              {
                  self.track_drag_button(*button, *state == ElementState::Pressed);
              }
@@ -16707,7 +16722,7 @@ index bbc296de44..705de478e0 100644
              if self.screen == Screen::EmoteWheel && self.emote_wheel_event(&event) {
                  return Ok(());
              }
-@@ -10150,18 +10174,18 @@ impl Game<'_> {
+@@ -10150,18 +10188,18 @@ impl Game<'_> {
                  && let PhysicalKey::Code(key) = event.physical_key
                  && self.screen_key_released(key)
              {
@@ -16734,7 +16749,7 @@ index bbc296de44..705de478e0 100644
              if let WindowEvent::MouseInput { state, button, .. } = &event
                  && !self.pad_synthetic_input()
                  && let Some(screen) = self.screen_view_now()
-@@ -10201,7 +10225,7 @@ impl Game<'_> {
+@@ -10201,7 +10239,7 @@ impl Game<'_> {
                      self.agent_cancel("the game window was closed; the game saves and exits");
                      self.begin_closing_save(true)?;
                  }
@@ -16743,7 +16758,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::Ime(winit::event::Ime::Commit(text)) => self.ime_commit(&text),
                  WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
                      self.ime_preedit(&text, cursor)
-@@ -10220,28 +10244,28 @@ impl Game<'_> {
+@@ -10220,28 +10258,28 @@ impl Game<'_> {
                      self.focus_lost = (!focused).then(Instant::now);
                      if focused {
                          if std::mem::take(&mut self.unclaimed_window) {
@@ -16785,7 +16800,7 @@ index bbc296de44..705de478e0 100644
                              let toggles = [
                                  self.settings.toggle_crouch,
                                  self.settings.toggle_sprint,
-@@ -10321,7 +10345,7 @@ impl Game<'_> {
+@@ -10321,7 +10359,7 @@ impl Game<'_> {
                          MouseScrollDelta::LineDelta(x, y) => (f64::from(x), f64::from(y)),
                          MouseScrollDelta::PixelDelta(p) => (p.x / 30.0, p.y / 30.0),
                      };
@@ -16794,7 +16809,7 @@ index bbc296de44..705de478e0 100644
                      let discrete = self.settings.discrete_scroll;
                      let wheel_sensitivity = f64::from(self.settings.mouse_wheel_sensitivity);
                      let scaled = |v: f64| {
-@@ -10332,13 +10356,13 @@ impl Game<'_> {
+@@ -10332,13 +10370,13 @@ impl Game<'_> {
                          }) * wheel_sensitivity
                      };
                      let d = scaled(raw_y) as f32;
@@ -16815,7 +16830,7 @@ index bbc296de44..705de478e0 100644
                      if !self.pad_synthetic_input()
                          && let Some((id, mouse)) = self.screen_view_now().map(|s| (s.id, s.mouse))
                      {
-@@ -10347,8 +10371,8 @@ impl Game<'_> {
+@@ -10347,8 +10385,8 @@ impl Game<'_> {
                              glfw_modifiers(self.modifiers),
                          );
                          let mut canceled = false;
@@ -16826,7 +16841,7 @@ index bbc296de44..705de478e0 100644
                          self.native_screen_mouse_scrolled_pre_v2(
                              id,
                              mouse,
-@@ -10368,9 +10392,9 @@ impl Game<'_> {
+@@ -10368,9 +10406,9 @@ impl Game<'_> {
                              return Ok(());
                          }
                      }
@@ -16839,7 +16854,7 @@ index bbc296de44..705de478e0 100644
                      if self.prompt_open() {
                          if self.command_prompt.is_some() || self.link_prompt.is_some() {
                          } else if self.code_of_conduct.is_some() {
-@@ -10401,9 +10425,9 @@ impl Game<'_> {
+@@ -10401,9 +10439,9 @@ impl Game<'_> {
                              title.scroll_worlds(d, self.cursor, gui);
                          }
                      }
@@ -16852,7 +16867,7 @@ index bbc296de44..705de478e0 100644
                      if self.hotbar_takes_wheel()
                          && !self.native_wheel_event(d)
                          && let Some((wheel, (horizontal_steps, vertical_steps))) = self
-@@ -10432,7 +10456,7 @@ impl Game<'_> {
+@@ -10432,7 +10470,7 @@ impl Game<'_> {
                      if self.screen == Screen::Options && d != 0.0 {
                          self.options_scroll(d)?;
                      }
@@ -16861,7 +16876,7 @@ index bbc296de44..705de478e0 100644
                      let bundle = bundles::takes_bundle_wheel(self.screen)
                          && d != 0.0
                          && self.bundle_scroll(scaled(raw_x), scaled(raw_y))
-@@ -10497,7 +10521,7 @@ impl Game<'_> {
+@@ -10497,7 +10535,7 @@ impl Game<'_> {
                          }
                      }
                  }
@@ -16870,7 +16885,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::MouseInput { state, button, .. } if self.remote_loading() => {
                      if state == ElementState::Pressed && button == MouseButton::Left {
                          self.connect_screen_click()?;
-@@ -10550,10 +10574,10 @@ impl Game<'_> {
+@@ -10550,10 +10588,10 @@ impl Game<'_> {
                      self.title_action(event_loop, action)?;
                      self.reopen_data_packs(event_loop)?;
                  }
@@ -16885,7 +16900,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::MouseInput {
                      state: ElementState::Pressed,
                      button: MouseButton::Middle,
-@@ -10604,7 +10628,7 @@ impl Game<'_> {
+@@ -10604,7 +10642,7 @@ impl Game<'_> {
                          if pressed && self.carried.is_none() {
                              self.inventory_hotkey(key);
                          }
@@ -16894,7 +16909,7 @@ index bbc296de44..705de478e0 100644
                          return Ok(());
                      }
                      if pressed
-@@ -10647,9 +10671,9 @@ impl Game<'_> {
+@@ -10647,9 +10685,9 @@ impl Game<'_> {
                          Screen::Inventory | Screen::Creative
                              if !matches!(button, MouseButton::Left | MouseButton::Right) =>
                          {
@@ -16907,7 +16922,7 @@ index bbc296de44..705de478e0 100644
                              if self.settings.keys.get("key.pickItem")
                                  == horizon_client::keybinds::mouse_name(button)
                              {
-@@ -10756,7 +10780,7 @@ impl Game<'_> {
+@@ -10756,7 +10794,7 @@ impl Game<'_> {
                          _ => {}
                      }
                  }
@@ -16916,7 +16931,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::KeyboardInput { event, .. }
                      if self.screen == Screen::Dead && self.ui.death_confirm.is_some() =>
                  {
-@@ -10770,7 +10794,7 @@ impl Game<'_> {
+@@ -10770,7 +10808,7 @@ impl Game<'_> {
                          self.death_confirm_answer(false)?;
                      }
                  }
@@ -16925,7 +16940,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::KeyboardInput { event, .. } if self.command_prompt.is_some() => {
                      if event.state == ElementState::Pressed
                          && let PhysicalKey::Code(key) = event.physical_key
-@@ -10785,7 +10809,7 @@ impl Game<'_> {
+@@ -10785,7 +10823,7 @@ impl Game<'_> {
                          self.answer_link_prompt(false);
                      }
                  }
@@ -16934,7 +16949,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::KeyboardInput { .. } if self.code_of_conduct.is_some() => {}
                  WindowEvent::KeyboardInput { event, .. } if self.server_packs.prompt.is_some() => {
                      if event.state == ElementState::Pressed
-@@ -10830,13 +10854,13 @@ impl Game<'_> {
+@@ -10830,13 +10868,13 @@ impl Game<'_> {
                      if let PhysicalKey::Code(key) = event.physical_key
                          && self.search_tab_hotbar_key(key)
                      {
@@ -16951,7 +16966,7 @@ index bbc296de44..705de478e0 100644
                          let before = self.creative_screen.search.value.clone();
                          let (ctrl, shift) = (self.has_control_down(), self.has_shift_down());
                          if self.creative_screen.search.key(key, ctrl, shift) {
-@@ -10855,7 +10879,7 @@ impl Game<'_> {
+@@ -10855,7 +10893,7 @@ impl Game<'_> {
                          && event.state == ElementState::Pressed
                          && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                  {
@@ -16960,7 +16975,7 @@ index bbc296de44..705de478e0 100644
                      self.recipe_key(&event);
                  }
                  WindowEvent::KeyboardInput { event, .. }
-@@ -10863,7 +10887,7 @@ impl Game<'_> {
+@@ -10863,7 +10901,7 @@ impl Game<'_> {
                          && event.state == ElementState::Pressed
                          && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                  {
@@ -16969,7 +16984,7 @@ index bbc296de44..705de478e0 100644
                      self.mod_browser_key(&event);
                  }
                  WindowEvent::KeyboardInput { event, .. }
-@@ -10871,7 +10895,7 @@ impl Game<'_> {
+@@ -10871,7 +10909,7 @@ impl Game<'_> {
                          && event.state == ElementState::Pressed
                          && !matches!(event.physical_key, PhysicalKey::Code(KeyCode::Escape)) =>
                  {
@@ -16978,7 +16993,7 @@ index bbc296de44..705de478e0 100644
                      if let Some(shortcut) = self.edit_shortcut(&event) {
                          self.station_shortcut(shortcut);
                      } else if let PhysicalKey::Code(key) = event.physical_key
-@@ -10891,16 +10915,16 @@ impl Game<'_> {
+@@ -10891,16 +10929,16 @@ impl Game<'_> {
                  WindowEvent::KeyboardInput { event, .. } if self.screen == Screen::Win => {
                      self.win_key(&event)?
                  }
@@ -17000,7 +17015,7 @@ index bbc296de44..705de478e0 100644
                  WindowEvent::KeyboardInput { event, .. }
                      if self.screen == Screen::Options && event.state == ElementState::Pressed =>
                  {
-@@ -10942,9 +10966,9 @@ impl Game<'_> {
+@@ -10942,9 +10980,9 @@ impl Game<'_> {
                              self.title_shortcut(shortcut);
                              return Ok(());
                          }
@@ -17013,7 +17028,7 @@ index bbc296de44..705de478e0 100644
                          if let PhysicalKey::Code(key) = event.physical_key {
                              let ctrl = self.has_control_down_with_quirk();
                              let shift = self.has_shift_down();
-@@ -10961,7 +10985,7 @@ impl Game<'_> {
+@@ -10961,7 +10999,7 @@ impl Game<'_> {
                          }
                          let (w, h) = self.gui_size();
                          match event.physical_key {
@@ -17022,7 +17037,7 @@ index bbc296de44..705de478e0 100644
                              PhysicalKey::Code(
                                  code @ (KeyCode::Enter | KeyCode::NumpadEnter | KeyCode::Space),
                              ) if code != KeyCode::Space
-@@ -11033,7 +11057,7 @@ impl Game<'_> {
+@@ -11033,7 +11071,7 @@ impl Game<'_> {
                          return Ok(());
                      };
                      self.native_key_event(key, event.state == ElementState::Pressed, event.repeat);
@@ -17031,7 +17046,7 @@ index bbc296de44..705de478e0 100644
                      if event.state == ElementState::Pressed
                          && self.screen == Screen::Inventory
                          && (self.merchant_key(key) || self.recipe_book_key(key))
-@@ -11060,8 +11084,8 @@ impl Game<'_> {
+@@ -11060,8 +11098,8 @@ impl Game<'_> {
                      self.previous = now;
                      self.upload_pace.frame(elapsed);
                      self.studio_fly(elapsed);
@@ -17042,7 +17057,7 @@ index bbc296de44..705de478e0 100644
                      if self.screen == Screen::Playing
                          && self.title.is_none()
                          && self.sign_edit.is_none()
-@@ -11073,7 +11097,7 @@ impl Game<'_> {
+@@ -11073,7 +11111,7 @@ impl Game<'_> {
                          let yaw = (turn(KeyCode::ArrowRight) - turn(KeyCode::ArrowLeft)) * 90.0;
                          let pitch = (turn(KeyCode::ArrowDown) - turn(KeyCode::ArrowUp)) * 90.0;
                          if yaw != 0.0 || pitch != 0.0 {
@@ -17051,7 +17066,7 @@ index bbc296de44..705de478e0 100644
                              self.turn_player(
                                  f64::from(yaw * secs / 0.15),
                                  f64::from(pitch * secs / 0.15),
-@@ -11087,26 +11111,26 @@ impl Game<'_> {
+@@ -11087,26 +11125,26 @@ impl Game<'_> {
                      let updated = Instant::now();
                      self.track_toggle_screens();
                      self.heal_hold_latches();
@@ -17085,7 +17100,7 @@ index bbc296de44..705de478e0 100644
                              if !self.clock.still() {
                                  self.tick_ambience();
                              } else if self.clock.runs_normally() {
-@@ -11117,11 +11141,11 @@ impl Game<'_> {
+@@ -11117,11 +11155,11 @@ impl Game<'_> {
                          }
                          self.tick_win_screen()?;
                          self.native_configs_tick_client();
@@ -17099,7 +17114,7 @@ index bbc296de44..705de478e0 100644
                          self.native_client_tick_post();
                          self.clock.record(started.elapsed());
                          if let Some(report) = self.clock.take_sprint_report() {
-@@ -11136,15 +11160,15 @@ impl Game<'_> {
+@@ -11136,15 +11174,15 @@ impl Game<'_> {
                      self.tick_world_icon();
                      let ticked = Instant::now();
                      let rendered = match self.render() {
@@ -17118,7 +17133,7 @@ index bbc296de44..705de478e0 100644
                      let frame_spans = if horizon_client::spans::recording_here() {
                          horizon_client::spans::take_raw()
                      } else {
-@@ -11249,7 +11273,7 @@ impl Game<'_> {
+@@ -11249,7 +11287,7 @@ impl Game<'_> {
                          }
                          self.debug_charts.frame_times.log(elapsed.as_nanos() as i64);
                          if self.frames == 0 {
@@ -17127,7 +17142,7 @@ index bbc296de44..705de478e0 100644
                              log::info!(
                                  "Horizon: first frame after {} ms",
                                  self.started.elapsed().as_millis()
-@@ -11302,9 +11326,9 @@ impl Game<'_> {
+@@ -11302,9 +11340,9 @@ impl Game<'_> {
  
              Ok(())
          })();
@@ -17140,7 +17155,7 @@ index bbc296de44..705de478e0 100644
          self.screen_chars_typed(typed.as_deref());
          if let Err(e) = result {
              self.error = Some(e);
-@@ -11312,7 +11336,7 @@ impl Game<'_> {
+@@ -11312,7 +11350,7 @@ impl Game<'_> {
          }
      }
  }
@@ -17149,7 +17164,7 @@ index bbc296de44..705de478e0 100644
  fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
      horizon_client::hud::decode(&root.join("assets/minecraft/textures/environment/clouds.png"))
          .map(|(w, h, px)| {
-@@ -11324,7 +11348,7 @@ fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
+@@ -11324,7 +11362,7 @@ fn load_clouds(root: &std::path::Path) -> (u32, u32, Vec<bool>) {
          })
          .unwrap_or((1, 1, vec![false]))
  }
@@ -17158,7 +17173,7 @@ index bbc296de44..705de478e0 100644
  fn load_forcefield(root: &std::path::Path) -> (u32, u32, Vec<u8>) {
      horizon_client::hud::decode(&root.join("assets/minecraft/textures/misc/forcefield.png"))
          .ok()
-@@ -11332,8 +11356,8 @@ fn load_forcefield(root: &std::path::Path) -> (u32, u32, Vec<u8>) {
+@@ -11332,8 +11370,8 @@ fn load_forcefield(root: &std::path::Path) -> (u32, u32, Vec<u8>) {
          .unwrap_or((1, 1, vec![0; 4]))
  }
  impl<'a> Game<'a> {
@@ -17169,7 +17184,7 @@ index bbc296de44..705de478e0 100644
      fn new(
          res: &'a Arc<Resources>,
          pack: PackResources,
-@@ -11345,7 +11369,7 @@ impl<'a> Game<'a> {
+@@ -11345,7 +11383,7 @@ impl<'a> Game<'a> {
      ) -> Result<Self> {
          let root = options.resources.clone();
          let registry = pack.assets.registry;
@@ -17178,7 +17193,7 @@ index bbc296de44..705de478e0 100644
          let mut streaming = Streaming::new(
              Arc::new(TestTerrain::new(registry, res.biomes())?),
              pack.context.clone(),
-@@ -11476,6 +11500,7 @@ impl<'a> Game<'a> {
+@@ -11476,6 +11514,7 @@ impl<'a> Game<'a> {
              unclaimed_window: false,
              focus_after_run: None,
              ime_allowed: false,
@@ -17186,7 +17201,7 @@ index bbc296de44..705de478e0 100644
              ime_area: None,
              focus_lost: None,
              modifiers: winit::keyboard::ModifiersState::empty(),
-@@ -11532,7 +11557,7 @@ impl<'a> Game<'a> {
+@@ -11532,7 +11571,7 @@ impl<'a> Game<'a> {
              session_lock: None,
              audio,
              music: {
@@ -17195,7 +17210,7 @@ index bbc296de44..705de478e0 100644
                  let mut music = horizon_client::music::MusicManager::default();
                  music.frequency = horizon_client::music::MusicFrequency::parse(
                      &settings.file.name("musicFrequency"),
-@@ -11540,7 +11565,7 @@ impl<'a> Game<'a> {
+@@ -11540,7 +11579,7 @@ impl<'a> Game<'a> {
                  music
              },
              music_layers: Default::default(),
@@ -17204,7 +17219,7 @@ index bbc296de44..705de478e0 100644
              now_playing: (settings.file.int("musicToast").clamp(0, 2) != 0).then(Default::default),
              music_toast_state: settings.file.int("musicToast").clamp(0, 2) as u8,
              music_notes: Default::default(),
-@@ -11608,7 +11633,7 @@ impl<'a> Game<'a> {
+@@ -11608,7 +11647,7 @@ impl<'a> Game<'a> {
              tool_highlight: Default::default(),
              saving_indicator: Default::default(),
              autosaving: false,
@@ -17213,7 +17228,7 @@ index bbc296de44..705de478e0 100644
              ticks_until_autosave: 6000,
              applied_modifiers: Vec::new(),
              experience: Experience::default(),
-@@ -11947,7 +11972,7 @@ impl<'a> Game<'a> {
+@@ -11947,7 +11986,7 @@ impl<'a> Game<'a> {
  
  impl Game<'_> {}
  
@@ -17222,7 +17237,7 @@ index bbc296de44..705de478e0 100644
  const HOTBAR_DIGITS: [KeyCode; 9] = [
      KeyCode::Digit1,
      KeyCode::Digit2,
-@@ -11959,7 +11984,7 @@ const HOTBAR_DIGITS: [KeyCode; 9] = [
+@@ -11959,7 +11998,7 @@ const HOTBAR_DIGITS: [KeyCode; 9] = [
      KeyCode::Digit8,
      KeyCode::Digit9,
  ];
@@ -17231,7 +17246,7 @@ index bbc296de44..705de478e0 100644
  const NUMERIC_KEYS: [KeyCode; 11] = [
      KeyCode::Digit0,
      KeyCode::Numpad0,
-@@ -11985,8 +12010,8 @@ fn load_world_rest(
+@@ -11985,8 +12024,8 @@ fn load_world_rest(
      visibility: horizon_world::block_render::FaceVisibility,
      progress: &Progress,
      started: Instant,
@@ -17242,7 +17257,7 @@ index bbc296de44..705de478e0 100644
      draws: bool,
  ) -> Result<WorldRest> {
      let facts = resources.facts();
-@@ -11995,14 +12020,14 @@ fn load_world_rest(
+@@ -11995,14 +12034,14 @@ fn load_world_rest(
      let registry = assets.registry;
      let overlay = &horizon_world::loot::PackOverlay::NONE;
      progress.set(6);
@@ -17261,7 +17276,7 @@ index bbc296de44..705de478e0 100644
          let recipe_sources =
              startup::time("rest.recipe_sources", || Recipes::sources(root, overlay))?;
          let stations = startup::time("rest.stations", || {
-@@ -12091,7 +12116,7 @@ fn load_world_rest(
+@@ -12091,7 +12130,7 @@ fn load_world_rest(
          );
          Ok((transformers, models))
      };
@@ -17270,7 +17285,7 @@ index bbc296de44..705de478e0 100644
      fn text<T, E: std::fmt::Display>(
          result: std::result::Result<T, E>,
      ) -> std::result::Result<T, String> {
-@@ -12217,9 +12242,9 @@ fn load_world_rest(
+@@ -12217,9 +12256,9 @@ fn load_world_rest(
      })
  }
  
@@ -17283,7 +17298,7 @@ index bbc296de44..705de478e0 100644
  #[cfg(target_os = "windows")]
  fn hwnd(window: &Window) -> Option<isize> {
      use winit::raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
-@@ -12243,7 +12268,7 @@ pub fn run_with() -> Result<()> {
+@@ -12243,7 +12282,7 @@ pub fn run_with() -> Result<()> {
      {
          return Ok(());
      }
@@ -17292,7 +17307,7 @@ index bbc296de44..705de478e0 100644
      let _ = horizon_client::lan::conn::SERVER_PACKET.set(Game::native_server_packet);
      let _ = horizon_client::lan::conn::ENTITY_DATA_TO.set(Game::native_entity_data_to);
      let _ = horizon_client::health::HURT_SERVER.set(native_hooks::hurt_server);
-@@ -12254,33 +12279,33 @@ pub fn run_with() -> Result<()> {
+@@ -12254,33 +12293,33 @@ pub fn run_with() -> Result<()> {
      let _ = horizon_client::lan::hub::PLAYER_MOVE.set(Game::native_player_move);
      let _ = horizon_client::lan::hub::PLAYER_TELEPORT.set(Game::native_player_teleport);
      let _ = horizon_client::block_contact::TRAMPLE.set(Game::native_trample);
@@ -17337,7 +17352,7 @@ index bbc296de44..705de478e0 100644
      if options.execution_role.is_client()
          && horizon_telemetry::Consent::load(&horizon_client::logging::game_home())
              .allows(horizon_telemetry::Kind::Perf)
-@@ -12288,14 +12313,14 @@ pub fn run_with() -> Result<()> {
+@@ -12288,14 +12327,14 @@ pub fn run_with() -> Result<()> {
          horizon_client::spans::record_here(true);
      }
      let vanilla_root = options.resources.clone();
@@ -17356,7 +17371,7 @@ index bbc296de44..705de478e0 100644
          if !options.offscreen && !synchronous_startup(&options) {
              log::error!("Horizon: {error}");
              let settings = Settings::load(&Game::options_path());
-@@ -12303,10 +12328,10 @@ pub fn run_with() -> Result<()> {
+@@ -12303,10 +12342,10 @@ pub fn run_with() -> Result<()> {
          }
          return Err(error.into());
      }
@@ -17371,7 +17386,7 @@ index bbc296de44..705de478e0 100644
      if !options.offscreen && !synchronous_startup(&options) {
          let version = horizon_client::telemetry::version();
          let game_dir = horizon_client::logging::player_dir();
-@@ -12316,12 +12341,12 @@ pub fn run_with() -> Result<()> {
+@@ -12316,12 +12355,12 @@ pub fn run_with() -> Result<()> {
      mods::register_standalone_models();
      mods::register_layer_definitions();
      let mut early_settings = Settings::load(&Game::options_path());
@@ -17387,7 +17402,7 @@ index bbc296de44..705de478e0 100644
      if options.execution_role.is_client() {
          if unclean_start_recovery(&mut early_settings) {
              log::warn!(
-@@ -12334,14 +12359,14 @@ pub fn run_with() -> Result<()> {
+@@ -12334,14 +12373,14 @@ pub fn run_with() -> Result<()> {
          );
          early_settings.save(&Game::options_path());
      }
@@ -17406,7 +17421,7 @@ index bbc296de44..705de478e0 100644
      Behaviours::set_cache_dir(std::env::current_dir()?.join(".horizon-cache"));
      if !synchronous_startup(&options) {
          return run_loading(options, early_settings, vanilla_root, None, started);
-@@ -12386,7 +12411,7 @@ pub fn run_with() -> Result<()> {
+@@ -12386,7 +12425,7 @@ pub fn run_with() -> Result<()> {
          loaded.entity_models,
      )?;
      if let Some(mut game) = game {
@@ -17415,7 +17430,7 @@ index bbc296de44..705de478e0 100644
          if game.options.execution_role.is_client() {
              game.settings.file.set(
                  "startedCleanly",
-@@ -12399,8 +12424,8 @@ pub fn run_with() -> Result<()> {
+@@ -12399,8 +12438,8 @@ pub fn run_with() -> Result<()> {
      Ok(())
  }
  
@@ -17426,7 +17441,7 @@ index bbc296de44..705de478e0 100644
  fn player_arms(
      root: &std::path::Path,
      key: &str,
-@@ -12417,7 +12442,7 @@ fn player_arms(
+@@ -12417,7 +12456,7 @@ fn player_arms(
      })
  }
  
@@ -17435,7 +17450,7 @@ index bbc296de44..705de478e0 100644
  fn tick_sleep_timer(timer: u32, sleeping: bool) -> u32 {
      if sleeping {
          (timer + 1).min(100)
-@@ -12428,8 +12453,8 @@ fn tick_sleep_timer(timer: u32, sleeping: bool) -> u32 {
+@@ -12428,8 +12467,8 @@ fn tick_sleep_timer(timer: u32, sleeping: bool) -> u32 {
      }
  }
  
@@ -17446,7 +17461,7 @@ index bbc296de44..705de478e0 100644
  fn outline_stop(
      origin: [f64; 3],
      dir: [f64; 3],
-@@ -12445,13 +12470,13 @@ fn outline_stop(
+@@ -12445,13 +12484,13 @@ fn outline_stop(
          point: std::array::from_fn(|i| origin[i] + dir[i] * t),
      })
  }
@@ -17467,7 +17482,7 @@ index bbc296de44..705de478e0 100644
  fn clip_start_source(
      eye: [f64; 3],
      dir: [f64; 3],
-@@ -12466,7 +12491,7 @@ fn clip_start_source(
+@@ -12466,7 +12505,7 @@ fn clip_start_source(
      };
      let probe_y = eye[1] + dir[1] * reach * 1.0e-7;
      if probe_y - f64::from(cell[1]) < height {
@@ -17476,7 +17491,7 @@ index bbc296de44..705de478e0 100644
          let normals: [[i32; 3]; 6] = [
              [0, -1, 0],
              [0, 1, 0],
-@@ -12517,10 +12542,10 @@ mod runtime_reset_tests;
+@@ -12517,10 +12556,10 @@ mod runtime_reset_tests;
  #[cfg(test)]
  mod entity_model_loading_tests;
  
@@ -17491,7 +17506,7 @@ index bbc296de44..705de478e0 100644
  pub(crate) fn closest_space_nudge(
      p: &PlayerMotion,
      world: &World,
-@@ -12551,8 +12576,8 @@ pub(crate) fn closest_space_nudge(
+@@ -12551,8 +12590,8 @@ pub(crate) fn closest_space_nudge(
              continue;
          }
          let (xd, zd) = (x - f64::from(bx), z - f64::from(bz));
@@ -17502,7 +17517,7 @@ index bbc296de44..705de478e0 100644
          let mut chosen = None;
          for (axis, step, distance) in [(0, -1, xd), (0, 1, 1.0 - xd), (1, -1, zd), (1, 1, 1.0 - zd)]
          {
-@@ -12585,14 +12610,14 @@ mod subtitles;
+@@ -12585,14 +12624,14 @@ mod subtitles;
  mod tests;
  #[cfg(test)]
  mod test_neighbourhood {
@@ -17522,7 +17537,7 @@ index bbc296de44..705de478e0 100644
          pub(crate) fn load_ticking_neighbourhood(&mut self, cx: i32, cz: i32) {
              for z in cz - 2..=cz + 2 {
                  for x in cx - 2..=cx + 2 {
-@@ -12603,7 +12628,7 @@ mod test_neighbourhood {
+@@ -12603,7 +12642,7 @@ mod test_neighbourhood {
                          (x, z),
                          std::sync::Arc::new(horizon_client::chunk::Chunk::empty(x, z)),
                      );
@@ -17531,7 +17546,7 @@ index bbc296de44..705de478e0 100644
                      let _ = self
                          .block_ticks
                          .add_empty_chunk(horizon_core::position::ChunkPos::new(x, z));
-@@ -12625,15 +12650,15 @@ fn write_level_for_role(
+@@ -12625,15 +12664,15 @@ fn write_level_for_role(
      }
  }
  
@@ -18387,7 +18402,7 @@ index 1e316adcf7..dfc812aa85 100644
      title_up && *screen == Screen::Playing
  }
 diff --git a/crates/horizon-client/src/game/ime.rs b/crates/horizon-client/src/game/ime.rs
-index 02acdc1d8b..094a9ff834 100644
+index 02acdc1d8b..475d59a113 100644
 --- a/crates/horizon-client/src/game/ime.rs
 +++ b/crates/horizon-client/src/game/ime.rs
 @@ -1,7 +1,7 @@
@@ -18435,7 +18450,7 @@ index 02acdc1d8b..094a9ff834 100644
              Screen::Options => self.ui.options.typing(),
              Screen::WorldOptions => self.world_options_typing(),
              Screen::Creative => self.mod_browser_typing() || self.creative_screen.tab().search,
-@@ -44,16 +44,42 @@ impl Game<'_> {
+@@ -44,16 +44,47 @@ impl Game<'_> {
          }
      }
  
@@ -18445,7 +18460,12 @@ index 02acdc1d8b..094a9ff834 100644
 +    
 +    #[cfg(target_os = "ios")]
 +    pub(super) fn ios_tap(&mut self, x: f64, y: f64) {
++        if !self.text_field_focused() {
++            return;
++        }
 +        if !self.ime_allowed {
++            self.ime_suppressed = false;
++            self.sync_ime();
 +            return;
 +        }
 +        let on_the_field = self.ime_area.is_some_and(|[ax, ay, aw, ah]| {
@@ -18482,7 +18502,7 @@ index 02acdc1d8b..094a9ff834 100644
              self.ime_area = None;
              if !want {
                  preedit::reset();
-@@ -61,8 +87,8 @@ impl Game<'_> {
+@@ -61,8 +92,8 @@ impl Game<'_> {
          }
      }
  
@@ -18493,7 +18513,7 @@ index 02acdc1d8b..094a9ff834 100644
      pub(super) fn ime_preedit(&mut self, text: &str, cursor: Option<(usize, usize)>) {
          if !self.text_field_focused() {
              preedit::reset();
-@@ -75,9 +101,9 @@ impl Game<'_> {
+@@ -75,9 +106,9 @@ impl Game<'_> {
          preedit::set_preedit(PreeditEvent::from_winit(text, cursor));
      }
  
@@ -18506,7 +18526,7 @@ index 02acdc1d8b..094a9ff834 100644
      pub(super) fn flush_ime(&mut self, hud: &mut HudBatch) {
          preedit::draw_overlay(hud, &self.gui.atlas);
          let Some([x0, y0, x1, y1]) = preedit::take_text_input_area() else {
-@@ -103,13 +129,13 @@ impl Game<'_> {
+@@ -103,13 +134,13 @@ impl Game<'_> {
          }
      }
  
@@ -18522,7 +18542,7 @@ index 02acdc1d8b..094a9ff834 100644
          if self.prompt_open() && !self.dialog_open() {
              return;
          }
-@@ -120,10 +146,10 @@ impl Game<'_> {
+@@ -120,10 +151,10 @@ impl Game<'_> {
              }
              return;
          }
@@ -18573,10 +18593,10 @@ index 0000000000..73a7fbc671
 +}
 diff --git a/crates/horizon-client/src/game/ios_touch.rs b/crates/horizon-client/src/game/ios_touch.rs
 new file mode 100644
-index 0000000000..2197c2a26e
+index 0000000000..3a2223dcd5
 --- /dev/null
 +++ b/crates/horizon-client/src/game/ios_touch.rs
-@@ -0,0 +1,529 @@
+@@ -0,0 +1,533 @@
 +
 +
 +
@@ -18934,19 +18954,23 @@ index 0000000000..2197c2a26e
 +        } else {
 +            return false;
 +        };
-+        let outside =
-+            gui_x < x0 || gui_x > x0 + panel_w || gui_y < y0 || gui_y > y0 + panel_h;
++        let band_x = (gui_w * 0.08).max(40.0);
++        let band_y = (gui_h * 0.08).max(18.0);
++        let bottom_keep = (gui_h * 0.72).min(gui_h - 34.0);
++        let on_the_edge =
++            gui_x < band_x || gui_x > gui_w - band_x || gui_y < band_y;
++        let outside = on_the_edge && gui_y < bottom_keep;
 +        if !outside {
 +            log::info!(
-+                "Horizon: touch {gui_x:.0},{gui_y:.0} inside the panel {x0:.0},{y0:.0} {panel_w}x{panel_h}"
++                "Horizon: touch {gui_x:.0},{gui_y:.0} near the panel {x0:.0},{y0:.0} {panel_w}x{panel_h}: not closing"
 +            );
 +            return false;
 +        }
 +        if self.carried.is_some() {
-+            log::info!("Horizon: touch outside the inventory with a stack carried: not closing");
++            log::info!("Horizon: touch on the edge band with a stack carried: not closing");
 +            return false;
 +        }
-+        log::info!("Horizon: touch outside the inventory: closing");
++        log::info!("Horizon: touch on the edge band: closing the container");
 +        self.ios_key(KeyCode::Escape, true);
 +        self.ios_key(KeyCode::Escape, false);
 +        true
