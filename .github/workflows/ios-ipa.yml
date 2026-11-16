@@ -105,14 +105,20 @@ jobs:
         working-directory: upstream-horizon
         run: |
           set -o pipefail
-          cargo build --release --target aarch64-apple-ios -p horizon-client-ios \
-            --features horizon-client/ios-touch > ../cargo-ios.log 2>&1 || {
+          cargo build --release --target aarch64-apple-ios -p horizon-client-ios             --features horizon-client/ios-touch > ../cargo-ios.log 2>&1 || {
               echo "::error::cargo build failed"
               grep -n -m 40 -E "^error" ../cargo-ios.log || tail -60 ../cargo-ios.log
               exit 1
             }
-          ls -l target/aarch64-apple-ios/release/libhorizon_client_ios.a
-          ln -sfn "$PWD/target" "$GITHUB_WORKSPACE/target"
+          lib=$(find target -name 'libhorizon_client_ios*.a' | head -1)
+          if [ -z "$lib" ]; then
+            echo "::error::static library not produced"
+            find target -name '*.a' | head -20
+            exit 1
+          fi
+          echo "static library: $lib"
+          mkdir -p "$GITHUB_WORKSPACE/libs"
+          cp "$lib" "$GITHUB_WORKSPACE/libs/"
 
       - uses: actions/upload-artifact@v4
         if: always()
