@@ -124,6 +124,13 @@ def package_existing(app: Path, out: Path) -> int:
     if not (target / EXECUTABLE_NAME).is_file():
         print(f"::error::{app.name} has no {EXECUTABLE_NAME}")
         return 1
+    plist_path = target / "Info.plist"
+    built = plistlib.loads(plist_path.read_bytes()) if plist_path.is_file() else {}
+    built.update(INFO_PLIST)
+    plist_path.write_bytes(plistlib.dumps(built))
+    if not write_icons(target):
+        print("::warning::no icon to bundle")
+
     if out.exists():
         out.unlink()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as ipa:
