@@ -22540,6 +22540,180 @@ index 53ae29111f..178ca9d910 100644
  alloc-census = ["alloc-count"]
  
  [lints]
+diff --git a/crates/horizon-threads/src/alloc_count.rs b/crates/horizon-threads/src/alloc_count.rs
+index 5e2e8b6b46..6efe54a5ce 100644
+--- a/crates/horizon-threads/src/alloc_count.rs
++++ b/crates/horizon-threads/src/alloc_count.rs
+@@ -1,11 +1,9 @@
+-//! Per-thread allocation counts (feature `alloc-count`); each thread writes only its own slot, so counting needs no atomic read-modify-write.
+ use std::{
+     alloc::{GlobalAlloc, Layout},
+     cell::Cell,
+     sync::atomic::{AtomicU64, AtomicUsize, Ordering::Relaxed},
+ };
+ 
+-/// Blocks and bytes allocated and freed.
+ #[derive(Clone, Copy, Default, Debug, PartialEq, Eq)]
+ pub struct Counts {
+     pub allocs: u64,
+@@ -15,7 +13,7 @@ pub struct Counts {
+ }
+ 
+ impl Counts {
+-    /// What happened since `earlier`, wrapping like the counters do.
++    
+     pub fn since(self, earlier: Counts) -> Counts {
+         Counts {
+             allocs: self.allocs.wrapping_sub(earlier.allocs),
+@@ -26,7 +24,6 @@ impl Counts {
+     }
+ }
+ 
+-/// Whether the game's own allocator counts (feature `alloc-count`, implied by `alloc-census`; never with `system-allocator`).
+ pub const ON: bool = cfg!(all(
+     feature = "alloc-count",
+     not(feature = "system-allocator")
+@@ -51,11 +48,11 @@ static TABLE: [Slot; SLOTS] = [const {
+         freed: AtomicU64::new(0),
+     }
+ }; SLOTS];
+-/// The next slot to give; slot 0 is the one threads share past the table's end.
++
+ static NEXT_SLOT: AtomicUsize = AtomicUsize::new(1);
+ 
+ thread_local! {
+-    // Const and with no destructor, so it works while a thread starts and exits.
++    
+     static SLOT: Cell<u16> = const { Cell::new(UNASSIGNED) };
+ }
+ 
+@@ -76,7 +73,6 @@ fn index() -> usize {
+     usize::from(index) & (SLOTS - 1)
+ }
+ 
+-/// Adds `n` to a counter its thread owns, or to the shared slot's.
+ #[inline]
+ fn bump(counter: &AtomicU64, shared: bool, n: u64) {
+     if shared {
+@@ -111,12 +107,10 @@ fn read(slot: &Slot) -> Counts {
+     }
+ }
+ 
+-/// This thread's counts (the shared slot's, for a thread past the 1023rd).
+ pub fn here() -> Counts {
+     read(&TABLE[index()])
+ }
+ 
+-/// Every thread's counts, finished threads' included.
+ pub fn process() -> Counts {
+     let used = NEXT_SLOT.load(Relaxed).min(SLOTS);
+     let mut total = read(&TABLE[0]);
+@@ -130,15 +124,18 @@ pub fn process() -> Counts {
+     total
+ }
+ 
+-/// mimalloc that counts every block; a `realloc` counts as a free plus an allocation.
++#[cfg(target_os = "ios")]
++const BACKING: std::alloc::System = std::alloc::System;
++#[cfg(not(target_os = "ios"))]
++const BACKING: mimalloc::MiMalloc = mimalloc::MiMalloc;
++
+ pub struct CountingAllocator;
+ 
+-// SAFETY: forwards every call to mimalloc; counting never allocates.
+ unsafe impl GlobalAlloc for CountingAllocator {
+     #[inline]
+     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+-        // SAFETY: the caller's contract.
+-        let block = unsafe { mimalloc::MiMalloc.alloc(layout) };
++        
++        let block = unsafe { BACKING.alloc(layout) };
+         if !block.is_null() {
+             on_alloc(layout.size());
+         }
+@@ -146,8 +143,8 @@ unsafe impl GlobalAlloc for CountingAllocator {
+     }
+     #[inline]
+     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+-        // SAFETY: the caller's contract.
+-        let block = unsafe { mimalloc::MiMalloc.alloc_zeroed(layout) };
++        
++        let block = unsafe { BACKING.alloc_zeroed(layout) };
+         if !block.is_null() {
+             on_alloc(layout.size());
+         }
+@@ -156,13 +153,13 @@ unsafe impl GlobalAlloc for CountingAllocator {
+     #[inline]
+     unsafe fn dealloc(&self, block: *mut u8, layout: Layout) {
+         on_free(layout.size());
+-        // SAFETY: the caller's contract.
+-        unsafe { mimalloc::MiMalloc.dealloc(block, layout) }
++        
++        unsafe { BACKING.dealloc(block, layout) }
+     }
+     #[inline]
+     unsafe fn realloc(&self, block: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
+-        // SAFETY: the caller's contract.
+-        let moved = unsafe { mimalloc::MiMalloc.realloc(block, layout, new_size) };
++        
++        let moved = unsafe { BACKING.realloc(block, layout, new_size) };
+         if !moved.is_null() {
+             on_free(layout.size());
+             on_alloc(new_size);
+@@ -185,7 +182,7 @@ mod tests {
+         let (mine, blocks) = std::thread::spawn(|| {
+             let start = here();
+             let blocks: Vec<usize> = (0..100)
+-                // SAFETY: a nonzero layout.
++                
+                 .map(|_| unsafe { CountingAllocator.alloc(layout(1000)) } as usize)
+                 .collect();
+             (here().since(start), blocks)
+@@ -195,7 +192,7 @@ mod tests {
+         let freed = std::thread::spawn(move || {
+             let start = here();
+             for block in blocks {
+-                // SAFETY: each block came from `alloc` with this layout.
++                
+                 unsafe { CountingAllocator.dealloc(block as *mut u8, layout(1000)) };
+             }
+             here().since(start)
+@@ -220,7 +217,7 @@ mod tests {
+                 freed: 100_000
+             }
+         );
+-        // Other tests allocate on their own threads meanwhile: at least these.
++        
+         let all = process().since(before);
+         assert!(all.allocs >= 100 && all.bytes >= 100_000);
+         assert!(all.frees >= 100 && all.freed >= 100_000);
+@@ -228,7 +225,7 @@ mod tests {
+ 
+     #[test]
+     fn a_realloc_is_a_free_and_an_allocation() {
+-        // SAFETY: nonzero layouts; the block is freed with the size it has.
++        
+         unsafe {
+             let block = CountingAllocator.alloc(layout(1000));
+             let start = here();
+@@ -250,7 +247,7 @@ mod tests {
+     #[test]
+     fn a_zeroed_block_counts_as_one_allocation() {
+         let start = here();
+-        // SAFETY: a nonzero layout, freed with the same one.
++        
+         unsafe {
+             let block = CountingAllocator.alloc_zeroed(layout(512));
+             CountingAllocator.dealloc(block, layout(512));
+@@ -263,7 +260,7 @@ mod tests {
+     fn a_finished_threads_counts_stay_in_the_total() {
+         let before = process();
+         std::thread::spawn(|| {
+-            // SAFETY: a nonzero layout, freed with the same one.
++            
+             unsafe {
+                 let block = CountingAllocator.alloc(layout(7777));
+                 CountingAllocator.dealloc(block, layout(7777));
 diff --git a/crates/horizon-threads/src/allocator_stats.rs b/crates/horizon-threads/src/allocator_stats.rs
 index 16a50fafff..54c30dcadd 100644
 --- a/crates/horizon-threads/src/allocator_stats.rs
@@ -22623,6 +22797,293 @@ index 0000000000..c555d92f36
 +    
 +    stacker::grow(DESKTOP_MAIN_STACK, build)
 +}
+diff --git a/crates/horizon-threads/src/heap_census.rs b/crates/horizon-threads/src/heap_census.rs
+index b3a4222b3a..15d89bfa93 100644
+--- a/crates/horizon-threads/src/heap_census.rs
++++ b/crates/horizon-threads/src/heap_census.rs
+@@ -1,15 +1,3 @@
+-//! Who holds the heap, for `horizon-ctl memory` (feature `alloc-census`, for
+-//! measuring only): mimalloc with a tag in front of each block, and the live
+-//! bytes of each tag. A block's tag is what ran on its thread when it was
+-//! allocated: the innermost [`tag`] (a startup step, a timed span or a pool
+-//! job: `startup::time`, `spans::time` and `jobs` set them), else the
+-//! thread's name. A block keeps its tag when another thread frees or grows
+-//! it, so a column generated by a pool job and kept by the server thread
+-//! counts for the job.
+-//!
+-//! Each block costs a header of 16 bytes (its alignment when larger) and an
+-//! atomic add: heaptrack's interpreter needed more than 7 GB for the game
+-//! (18 GB with line tables), this needs nothing beside it.
+ use std::{
+     alloc::{GlobalAlloc, Layout},
+     cell::Cell,
+@@ -20,34 +8,32 @@ use std::{
+ };
+ 
+ const TAGS: usize = 512;
+-/// Blocks allocated while this thread names itself, and past the table's end.
++
+ const UNTAGGED: u32 = 0;
+ const NONE: u32 = u32::MAX;
+ 
+ static LIVE: [AtomicIsize; TAGS] = [const { AtomicIsize::new(0) }; TAGS];
+ static NAME_PTR: [AtomicPtr<u8>; TAGS] = [const { AtomicPtr::new(std::ptr::null_mut()) }; TAGS];
+ static NAME_LEN: [AtomicUsize; TAGS] = [const { AtomicUsize::new(0) }; TAGS];
+-/// The next free slot; slot 0 is [`UNTAGGED`].
++
+ static NEXT: AtomicUsize = AtomicUsize::new(1);
+ 
+ thread_local! {
+     static STEP: Cell<u32> = const { Cell::new(NONE) };
+     static THREAD: Cell<u32> = const { Cell::new(NONE) };
+-    /// Allocations this thread made before its tag settled: std names a
+-    /// thread after its first few, so the name is read again until then.
++    
++    
+     static NAMING: Cell<u32> = const { Cell::new(0) };
+     static BUSY: Cell<bool> = const { Cell::new(false) };
+ }
+ 
+-/// The slot of `name`, registering it. A race may give one name two slots;
+-/// [`census`] adds them up.
+ fn slot(name: &'static str) -> u32 {
+     let n = NEXT.load(Relaxed).min(TAGS);
+     for i in 1..n {
+         let ptr = NAME_PTR[i].load(Acquire);
+         if !ptr.is_null() && NAME_LEN[i].load(Relaxed) == name.len() {
+-            // SAFETY: `NAME_PTR[i]` is published with `Release` after `NAME_LEN[i]`
+-            // and the leaked or static string bytes are initialized.
++            
++            
+             let s = unsafe { std::slice::from_raw_parts(ptr, name.len()) };
+             if s == name.as_bytes() {
+                 return i as u32;
+@@ -63,35 +49,24 @@ fn slot(name: &'static str) -> u32 {
+     i as u32
+ }
+ 
+-/// The OS name of the calling thread, read without allocating.
+ #[cfg(all(not(miri), any(target_vendor = "apple", target_os = "linux")))]
+ pub(crate) fn thread_name(buf: &mut [u8; 64]) -> &[u8] {
+-    // SAFETY: writes at most `buf.len()` bytes, NUL included, into `buf`.
++    
+     let ok = unsafe {
+         libc::pthread_getname_np(libc::pthread_self(), buf.as_mut_ptr().cast(), buf.len())
+     } == 0;
+     let len = buf.iter().position(|&b| b == 0).unwrap_or(0);
+     if ok { &buf[..len] } else { &[] }
+ }
+-/// Where there is no `pthread_getname_np` -- Windows -- the name
+-/// `std::thread::Builder::name` set is still in Rust's own thread handle, so
+-/// read it from there. This returned nothing at all before, so on Windows
+-/// every untagged allocation on every thread fell into one `unnamed thread`
+-/// bucket: 580 MiB of a playing game's resident set, saying nothing about
+-/// which thread held it.
+-///
+-/// `thread::current` can allocate the first time a thread asks for its
+-/// handle, which lands back in this allocator. That is already handled: the
+-/// `BUSY` guard in [`thread_tag`] answers the nested call `UNTAGGED` rather
+-/// than recursing, as the module's note on naming allocations says.
++
+ #[cfg(any(miri, not(any(target_vendor = "apple", target_os = "linux"))))]
+ pub(crate) fn thread_name(buf: &mut [u8; 64]) -> &[u8] {
+     let current = std::thread::current();
+     let Some(name) = current.name() else {
+         return &[];
+     };
+-    // Truncated to what `buf` holds, on a character boundary so the result is
+-    // always valid UTF-8 for the caller.
++    
++    
+     let mut len = name.len().min(buf.len());
+     while len > 0 && !name.is_char_boundary(len) {
+         len -= 1;
+@@ -100,8 +75,6 @@ pub(crate) fn thread_name(buf: &mut [u8; 64]) -> &[u8] {
+     &buf[..len]
+ }
+ 
+-/// The calling thread's own tag: its name, looked up again for its first
+-/// allocations. Allocations made while it registers a name are untagged.
+ fn thread_tag() -> u32 {
+     let known = THREAD.get();
+     if known != NONE && NAMING.get() >= 256 {
+@@ -119,7 +92,7 @@ fn thread_tag() -> u32 {
+     let tag = if known != NONE && slot_name(known) == Some(name) {
+         known
+     } else {
+-        // Thread names are few: each is leaked once.
++        
+         let name: &'static str = match name {
+             "unnamed thread" => "unnamed thread",
+             name => Box::leak(name.to_owned().into_boxed_str()),
+@@ -137,8 +110,8 @@ fn slot_name(i: u32) -> Option<&'static str> {
+     if ptr.is_null() {
+         return None;
+     }
+-    // SAFETY: `NAME_PTR[i]` is published with `Release` after `NAME_LEN[i]`
+-    // and the leaked or static UTF-8 string bytes are initialized.
++    
++    
+     Some(unsafe {
+         std::str::from_utf8_unchecked(std::slice::from_raw_parts(ptr, NAME_LEN[i].load(Relaxed)))
+     })
+@@ -151,14 +124,13 @@ fn current() -> u32 {
+     }
+ }
+ 
+-/// While it lives, the calling thread's blocks are tagged `name`.
+ pub struct Tag(u32);
+ impl Drop for Tag {
+     fn drop(&mut self) {
+         STEP.set(self.0);
+     }
+ }
+-/// Tag the calling thread's blocks `name` until the guard drops.
++
+ pub fn tag(name: &'static str) -> Tag {
+     let previous = STEP.get();
+     let was = BUSY.replace(true);
+@@ -168,7 +140,6 @@ pub fn tag(name: &'static str) -> Tag {
+     Tag(previous)
+ }
+ 
+-/// Live bytes by tag, largest first.
+ pub fn census() -> Vec<(&'static str, isize)> {
+     let mut by_name: Vec<(&'static str, isize)> = Vec::new();
+     for i in 0..NEXT.load(Relaxed).min(TAGS) {
+@@ -183,21 +154,17 @@ pub fn census() -> Vec<(&'static str, isize)> {
+     by_name
+ }
+ 
+-#[cfg(not(miri))]
+-use mimalloc::MiMalloc as BackingAlloc;
+-#[cfg(miri)]
++#[cfg(any(miri, target_os = "ios"))]
+ use std::alloc::System as BackingAlloc;
++#[cfg(not(any(miri, target_os = "ios")))]
++use mimalloc::MiMalloc as BackingAlloc;
+ 
+-/// mimalloc with a tag in front of each block (see the module).
+ pub struct CensusAllocator;
+ 
+-/// The header in front of a block of `layout`: 16 bytes, or its alignment.
+ fn header(layout: Layout) -> usize {
+     layout.align().max(16)
+ }
+ 
+-// SAFETY: forwards every call to the backing allocator with the header added;
+-// the tag sits in the header's last four bytes, inside the returned block.
+ unsafe impl GlobalAlloc for CensusAllocator {
+     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+         let h = header(layout);
+@@ -207,7 +174,7 @@ unsafe impl GlobalAlloc for CensusAllocator {
+         let Ok(outer) = Layout::from_size_align(outer_size, layout.align().max(16)) else {
+             return std::ptr::null_mut();
+         };
+-        // SAFETY: `outer` has a nonzero size.
++        
+         let base = unsafe { BackingAlloc.alloc(outer) };
+         if base.is_null() {
+             return base;
+@@ -215,7 +182,7 @@ unsafe impl GlobalAlloc for CensusAllocator {
+         let tag = current();
+         LIVE[tag as usize].fetch_add(layout.size() as isize, Relaxed);
+         crate::alloc_count::on_alloc(layout.size());
+-        // SAFETY: `h` bytes precede the caller's block inside the allocation.
++        
+         unsafe {
+             let block = base.add(h);
+             block.sub(4).cast::<u32>().write_unaligned(tag);
+@@ -224,7 +191,7 @@ unsafe impl GlobalAlloc for CensusAllocator {
+     }
+     unsafe fn dealloc(&self, block: *mut u8, layout: Layout) {
+         let h = header(layout);
+-        // SAFETY: `block` came from `alloc` with this layout.
++        
+         unsafe {
+             let tag = block.sub(4).cast::<u32>().read_unaligned();
+             LIVE[tag as usize].fetch_sub(layout.size() as isize, Relaxed);
+@@ -242,7 +209,7 @@ unsafe impl GlobalAlloc for CensusAllocator {
+         if Layout::from_size_align(new_outer, layout.align().max(16)).is_err() {
+             return std::ptr::null_mut();
+         }
+-        // SAFETY: `block` came from `alloc` with this layout; the header moves with it.
++        
+         unsafe {
+             let outer =
+                 Layout::from_size_align_unchecked(layout.size() + h, layout.align().max(16));
+@@ -273,17 +240,17 @@ mod tests {
+         let layout = Layout::from_size_align(1 << 20, 64).unwrap();
+         let block = {
+             let _tag = tag("test.step");
+-            // SAFETY: a nonzero layout.
++            
+             unsafe { CensusAllocator.alloc(layout) }
+         };
+         assert_eq!(live("test.step"), 1 << 20);
+-        // SAFETY: `block` came from this allocator with `layout`.
++        
+         let block = unsafe { CensusAllocator.realloc(block, layout, 3 << 20) } as usize;
+         assert_eq!(live("test.step"), 3 << 20, "growing keeps the step's tag");
+         let grown = Layout::from_size_align(3 << 20, 64).unwrap();
+         std::thread::spawn(move || {
+             let _other = tag("test.other");
+-            // SAFETY: `block` came from this allocator with `grown`.
++            
+             unsafe { CensusAllocator.dealloc(block as *mut u8, grown) };
+         })
+         .join()
+@@ -297,7 +264,7 @@ mod tests {
+         use crate::alloc_count::{Counts, here};
+         let layout = Layout::from_size_align(1000, 8).unwrap();
+         let start = here();
+-        // SAFETY: nonzero layouts; the block is freed with the size it has.
++        
+         unsafe {
+             let block = CensusAllocator.alloc(layout);
+             let grown = CensusAllocator.realloc(block, layout, 3000);
+@@ -318,16 +285,16 @@ mod tests {
+         let (name, block) = std::thread::Builder::new()
+             .name("census-test".into())
+             .spawn(move || {
+-                // SAFETY: a nonzero layout.
++                
+                 let block = unsafe { CensusAllocator.alloc(layout) } as usize;
+                 (std::thread::current().name().unwrap().to_owned(), block)
+             })
+             .unwrap()
+             .join()
+             .unwrap();
+-        // Linux keeps 15 bytes of a thread's name; the test's is shorter.
++        
+         assert_eq!(live(&name), 4096);
+-        // SAFETY: `block` came from this allocator with `layout`.
++        
+         unsafe { CensusAllocator.dealloc(block as *mut u8, layout) };
+         assert_eq!(live(&name), 0);
+     }
+@@ -335,7 +302,7 @@ mod tests {
+     #[test]
+     fn concurrent_thread_name_registration_and_overflow_are_sound() {
+         let small = Layout::from_size_align(64, 16).unwrap();
+-        // SAFETY: valid layout; overflowed realloc size must fail cleanly without UB.
++        
+         unsafe {
+             let block = CensusAllocator.alloc(small);
+             assert!(!block.is_null());
+@@ -352,10 +319,10 @@ mod tests {
+                     std::thread::Builder::new()
+                         .name(name)
+                         .spawn(move || {
+-                            // SAFETY: valid layout.
++                            
+                             let p = unsafe { CensusAllocator.alloc(small) };
+                             let _ = census();
+-                            // SAFETY: `p` came from `alloc` with `small`.
++                            
+                             unsafe { CensusAllocator.dealloc(p, small) };
+                         })
+                         .unwrap()
 diff --git a/crates/horizon-threads/src/ios_multitouch.rs b/crates/horizon-threads/src/ios_multitouch.rs
 new file mode 100644
 index 0000000000..d0da11a45f
