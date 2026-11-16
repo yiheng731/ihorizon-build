@@ -21022,7 +21022,7 @@ index 0000000000..8f1df4fe82
 +}
 diff --git a/crates/horizon-client/src/game/ios_touch.rs b/crates/horizon-client/src/game/ios_touch.rs
 new file mode 100644
-index 0000000000..3df38f2f0d
+index 0000000000..1d77314b8a
 --- /dev/null
 +++ b/crates/horizon-client/src/game/ios_touch.rs
 @@ -0,0 +1,602 @@
@@ -21572,7 +21572,7 @@ index 0000000000..3df38f2f0d
 +}
 +
 +#[cfg(all(target_os = "ios", feature = "ios-touch"))]
-+impl Game {
++impl Game<'_> {
 +    pub(super) fn drain_commands(&mut self) {
 +        for line in horizon_threads::ios_commands::take() {
 +            let mut words = line.split_whitespace();

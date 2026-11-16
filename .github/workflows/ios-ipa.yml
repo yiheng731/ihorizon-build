@@ -100,6 +100,17 @@ jobs:
           workspaces: upstream-horizon -> target
           key: ios-client
 
+      - name: Type check first
+        working-directory: upstream-horizon
+        run: |
+          set -o pipefail
+          cargo check --target aarch64-apple-ios -p horizon-client-ios             --features horizon-client/ios-touch > ../check-ios.log 2>&1 || {
+              echo "::error::type check failed"
+              grep -n -m 40 -E "^error" ../check-ios.log || tail -60 ../check-ios.log
+              exit 1
+            }
+          tail -3 ../check-ios.log
+
       - name: Build the static library
         working-directory: upstream-horizon
         run: |
