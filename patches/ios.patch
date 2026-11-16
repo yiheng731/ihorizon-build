@@ -23084,6 +23084,43 @@ index b3a4222b3a..15d89bfa93 100644
                              unsafe { CensusAllocator.dealloc(p, small) };
                          })
                          .unwrap()
+diff --git a/crates/horizon-threads/src/ios_commands.rs b/crates/horizon-threads/src/ios_commands.rs
+new file mode 100644
+index 0000000000..a4ac54c652
+--- /dev/null
++++ b/crates/horizon-threads/src/ios_commands.rs
+@@ -0,0 +1,31 @@
++use std::sync::Mutex;
++
++static QUEUE: Mutex<Vec<String>> = Mutex::new(Vec::new());
++
++pub fn push(line: String) {
++    if let Ok(mut queue) = QUEUE.lock()
++        && queue.len() < 256
++    {
++        queue.push(line);
++    }
++}
++
++pub fn take() -> Vec<String> {
++    match QUEUE.lock() {
++        Ok(mut queue) => std::mem::take(&mut *queue),
++        Err(poisoned) => std::mem::take(&mut *poisoned.into_inner()),
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn takes_what_was_pushed_and_empties() {
++        push("key w down".into());
++        push("key w up".into());
++        assert_eq!(take(), vec!["key w down", "key w up"]);
++        assert!(take().is_empty());
++    }
++}
 diff --git a/crates/horizon-threads/src/ios_multitouch.rs b/crates/horizon-threads/src/ios_multitouch.rs
 new file mode 100644
 index 0000000000..d0da11a45f
