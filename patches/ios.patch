@@ -10159,6 +10159,622 @@ index fd4acea6be..5fde5bc87f 100644
  pub mod hud_overlays;
  pub mod inventory_effects;
  pub mod java_text;
+diff --git a/crates/horizon-client-render/src/touch_hud.rs b/crates/horizon-client-render/src/touch_hud.rs
+new file mode 100644
+index 0000000000..6da9591d00
+--- /dev/null
++++ b/crates/horizon-client-render/src/touch_hud.rs
+@@ -0,0 +1,610 @@
++use crate::hud::{HudAtlas, HudBatch};
++use crate::hud_layout;
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Button {
++    Jump,
++    Sneak,
++    Attack,
++    Place,
++    Inventory,
++    Chat,
++    Pause,
++}
++
++impl Button {
++    
++    pub fn label(self) -> &'static str {
++        match self {
++            Button::Jump => "JMP",
++            Button::Sneak => "SNK",
++            Button::Attack => "HIT",
++            Button::Place => "PUT",
++            Button::Inventory => "INV",
++            Button::Chat => "CHT",
++            Button::Pause => "ESC",
++        }
++    }
++}
++
++#[derive(Clone, Copy, Debug, PartialEq)]
++pub struct Rect {
++    pub x0: f32,
++    pub y0: f32,
++    pub x1: f32,
++    pub y1: f32,
++}
++
++impl Rect {
++    pub fn contains(&self, x: f32, y: f32) -> bool {
++        x >= self.x0 && x <= self.x1 && y >= self.y0 && y <= self.y1
++    }
++    pub fn centre(&self) -> (f32, f32) {
++        ((self.x0 + self.x1) * 0.5, (self.y0 + self.y1) * 0.5)
++    }
++}
++
++pub const STICK_RADIUS: f32 = 24.0;
++
++pub const STICK_CENTRE: (f32, f32) = (52.0, 52.0);
++
++pub const HOTBAR_HEIGHT: f32 = 22.0;
++
++pub const HOTBAR_WIDTH: f32 = 182.0;
++const BUTTON: f32 = 44.0;
++
++const STICK_PAD: f32 = 120.0;
++
++const STICK_KNOB: f32 = 56.0;
++
++#[derive(Clone)]
++pub struct Layout {
++    pub width: f32,
++    pub height: f32,
++    pub stick: (f32, f32),
++    
++    pub pad: f32,
++    pub knob: f32,
++    
++    pub stick_radius: f32,
++    pub buttons: [(Button, Rect); 7],
++    
++    
++    pub look: Rect,
++    pub hotbar: Rect,
++    
++    pub debug: bool,
++    
++    pub touch: Option<(f32, f32)>,
++    
++    pub edit: bool,
++}
++
++pub fn layout(width: f32, height: f32) -> Layout {
++    layout_with(width, height, None)
++}
++
++pub fn layout_with(width: f32, height: f32, custom: Option<&Custom>) -> Layout {
++    let button = custom.and_then(|c| c.button_size).unwrap_or(BUTTON).max(16.0);
++    let pad = custom.and_then(|c| c.stick_size).unwrap_or(STICK_PAD).max(40.0);
++    let knob = custom.and_then(|c| c.knob_size).unwrap_or(STICK_KNOB).max(16.0);
++    let right = width - 10.0;
++    let bottom = height - 12.0;
++    let at = |x1: f32, y1: f32| Rect {
++        x0: x1 - button,
++        y0: y1 - button,
++        x1,
++        y1,
++    };
++    
++    
++    let buttons = [
++        (Button::Jump, at(right, bottom)),
++        (Button::Sneak, at(right, bottom - button - 6.0)),
++        (
++            Button::Attack,
++            at(right - button - 6.0, bottom),
++        ),
++        (
++            Button::Place,
++            at(right - BUTTON - 6.0, bottom - button - 6.0),
++        ),
++        (
++            Button::Inventory,
++            at(right, bottom - 2.0 * (button + 6.0)),
++        ),
++        (
++            Button::Chat,
++            at(right - BUTTON - 6.0, bottom - 2.0 * (button + 6.0)),
++        ),
++        (
++            Button::Pause,
++            at(right, bottom - 3.0 * (button + 6.0)),
++        ),
++    ];
++    let hotbar = Rect {
++        x0: (width - HOTBAR_WIDTH) * 0.5,
++        y0: height - HOTBAR_HEIGHT,
++        x1: (width + HOTBAR_WIDTH) * 0.5,
++        y1: height,
++    };
++    let put = |place: [f32; 2]| (width * place[0], height * place[1]);
++    let mut layout = Layout {
++        width,
++        height,
++        stick: (STICK_CENTRE.0, height - STICK_CENTRE.1),
++        pad,
++        knob,
++        stick_radius: pad * 0.2,
++        buttons,
++        look: Rect {
++            x0: width * 0.34,
++            y0: 0.0,
++            x1: width,
++            y1: height,
++        },
++        hotbar,
++        debug: false,
++        touch: None,
++        edit: false,
++    };
++    let Some(custom) = custom else {
++        return layout;
++    };
++    layout.debug = custom.debug.unwrap_or(false) || custom.edit.unwrap_or(false);
++    layout.edit = custom.edit.unwrap_or(false);
++    if let Some(place) = custom.stick {
++        layout.stick = put(place);
++    }
++    if let Some([x, y]) = custom.hotbar {
++        let half = HOTBAR_WIDTH * 0.5;
++        layout.hotbar = Rect {
++            x0: width * x - half,
++            y0: height * y - HOTBAR_HEIGHT,
++            x1: width * x + half,
++            y1: height * y,
++        };
++    }
++    if let Some(places) = &custom.buttons {
++        for (slot, rect) in layout.buttons.iter_mut() {
++            let Some(at) = places.get(key(*slot)) else {
++                continue;
++            };
++            
++            let (cx, cy) = put(*at);
++            *rect = Rect {
++                x0: cx - button * 0.5,
++                y0: cy - button * 0.5,
++                x1: cx + button * 0.5,
++                y1: cy + button * 0.5,
++            };
++        }
++    }
++    if let Some(sizes) = &custom.buttons_size {
++        for (slot, rect) in layout.buttons.iter_mut() {
++            let Some(side) = sizes.get(key(*slot)) else {
++                continue;
++            };
++            
++            let side = side.max(16.0);
++            let (cx, cy) = rect.centre();
++            *rect = Rect {
++                x0: cx - side * 0.5,
++                y0: cy - side * 0.5,
++                x1: cx + side * 0.5,
++                y1: cy + side * 0.5,
++            };
++        }
++    }
++    if let Some(share) = custom.look_from {
++        layout.look.x0 = width * share;
++    }
++    layout
++}
++
++fn key(button: Button) -> &'static str {
++    match button {
++        Button::Jump => "jump",
++        Button::Sneak => "sneak",
++        Button::Attack => "attack",
++        Button::Place => "place",
++        Button::Inventory => "inventory",
++        Button::Chat => "chat",
++        Button::Pause => "pause",
++    }
++}
++
++#[derive(Clone, Debug, Default, serde::Deserialize)]
++pub struct Custom {
++    
++    #[serde(default)]
++    pub button_size: Option<f32>,
++    
++    #[serde(default)]
++    pub stick_size: Option<f32>,
++    #[serde(default)]
++    pub knob_size: Option<f32>,
++    
++    #[serde(default)]
++    pub stick: Option<[f32; 2]>,
++    
++    #[serde(default)]
++    pub hotbar: Option<[f32; 2]>,
++    
++    #[serde(default)]
++    pub buttons: Option<std::collections::BTreeMap<String, [f32; 2]>>,
++    
++    #[serde(default)]
++    pub buttons_size: Option<std::collections::BTreeMap<String, f32>>,
++    
++    #[serde(default)]
++    pub look_from: Option<f32>,
++    
++    
++    #[serde(default)]
++    pub debug: Option<bool>,
++    
++    #[serde(default)]
++    pub edit: Option<bool>,
++}
++
++pub const FILE: &str = "touch_layout.json";
++
++pub const BAKED: &str = concat!(
++    "{",
++    "  \"button_size\": 18,",
++    "  \"buttons\": {",
++    "    \"attack\": [",
++    "      0.827,",
++    "      0.699",
++    "    ],",
++    "    \"chat\": [",
++    "      0.479,",
++    "      0.041",
++    "    ],",
++    "    \"inventory\": [",
++    "      0.672,",
++    "      0.959",
++    "    ],",
++    "    \"jump\": [",
++    "      0.927,",
++    "      0.398",
++    "    ],",
++    "    \"pause\": [",
++    "      0.521,",
++    "      0.041",
++    "    ],",
++    "    \"place\": [",
++    "      0.927,",
++    "      0.797",
++    "    ],",
++    "    \"sneak\": [",
++    "      0.926,",
++    "      0.6",
++    "    ]",
++    "  },",
++    "  \"buttons_size\": {",
++    "    \"attack\": 30,",
++    "    \"chat\": 18,",
++    "    \"inventory\": 18,",
++    "    \"jump\": 30,",
++    "    \"pause\": 18,",
++    "    \"place\": 30,",
++    "    \"sneak\": 30",
++    "  },",
++    "  \"debug\": false,",
++    "  \"edit\": false,",
++    "  \"hotbar\": [",
++    "    0.5,",
++    "    1.0",
++    "  ],",
++    "  \"knob_size\": 31,",
++    "  \"look_from\": 0.34,",
++    "  \"stick\": [",
++    "    0.148,",
++    "    0.749",
++    "  ],",
++    "  \"stick_size\": 66",
++    "}",
++);
++
++#[must_use]
++pub fn default_file(width: f32, height: f32) -> String {
++    if !BAKED.is_empty() {
++        return BAKED.to_owned();
++    }
++    let mut places = std::collections::BTreeMap::new();
++    let layout = layout(width, height);
++    let share = |x: f32, y: f32| [x / layout.width, y / layout.height];
++    for (button, rect) in layout.buttons {
++        let (x, y) = rect.centre();
++        let [x, y] = share(x, y);
++        places.insert(
++            key(button).to_owned(),
++            [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)],
++        );
++    }
++    let [sx, sy] = share(layout.stick.0, layout.stick.1);
++    let doc = serde_json::json!({
++        "button_size": BUTTON,
++        "stick_size": STICK_PAD,
++        "knob_size": STICK_KNOB,
++        "stick": [sx, sy],
++        "hotbar": [0.5, 1.0],
++        "look_from": 0.34,
++        "buttons": places,
++    });
++    serde_json::to_string_pretty(&doc).unwrap_or_default()
++}
++
++impl Layout {
++    
++    
++    pub fn button_at(&self, x: f32, y: f32) -> Option<Button> {
++        self.buttons
++            .iter()
++            .find(|(_, rect)| rect.contains(x, y))
++            .map(|(button, _)| *button)
++    }
++    
++    
++    #[must_use]
++    
++    
++    
++    pub fn toggle(&self) -> Rect {
++        Rect {
++            x0: 0.0,
++            y0: 0.0,
++            x1: 0.0,
++            y1: 0.0,
++        }
++    }
++    
++    
++    #[must_use]
++    pub fn handle_at(&self, x: f32, y: f32) -> Option<Handle> {
++        if let Some(button) = self.button_at(x, y) {
++            return Some(Handle::Button(button));
++        }
++        let (sx, sy) = self.stick;
++        let half = self.pad * 0.5;
++        if (x - sx).abs() <= half && (y - sy).abs() <= half {
++            return Some(Handle::Stick);
++        }
++        self.hotbar.contains(x, y).then_some(Handle::Hotbar)
++    }
++    
++    pub fn move_handle(&mut self, handle: Handle, x: f32, y: f32) {
++        let (x, y) = (x.clamp(0.0, self.width), y.clamp(0.0, self.height));
++        match handle {
++            Handle::Stick => {
++                self.stick = (x, y);
++            }
++            Handle::Button(button) => {
++                let side = self
++                    .buttons
++                    .iter()
++                    .find(|(slot, _)| *slot == button)
++                    .map_or(44.0, |(_, rect)| rect.x1 - rect.x0);
++                if let Some((_, rect)) = self.buttons.iter_mut().find(|(slot, _)| *slot == button) {
++                    *rect = Rect {
++                        x0: x - side * 0.5,
++                        y0: y - side * 0.5,
++                        x1: x + side * 0.5,
++                        y1: y + side * 0.5,
++                    };
++                }
++            }
++            Handle::Hotbar => {
++                
++                let half = (self.hotbar.x1 - self.hotbar.x0) * 0.5;
++                let height = self.hotbar.y1 - self.hotbar.y0;
++                self.hotbar = Rect {
++                    x0: x - half,
++                    y0: y - height,
++                    x1: x + half,
++                    y1: y,
++                };
++            }
++        }
++    }
++    
++    #[must_use]
++    pub fn file(&self) -> String {
++        let share = |x: f32, y: f32| [x / self.width, y / self.height];
++        let mut places = std::collections::BTreeMap::new();
++        for (button, rect) in self.buttons {
++            let (x, y) = rect.centre();
++            let [x, y] = share(x, y);
++            places.insert(key(button).to_owned(), [x, y]);
++        }
++        let [sx, sy] = share(self.stick.0, self.stick.1);
++        let [hx, hy] = share(
++            (self.hotbar.x0 + self.hotbar.x1) * 0.5,
++            self.hotbar.y1,
++        );
++        let mut sides = std::collections::BTreeMap::new();
++        for (button, rect) in self.buttons {
++            sides.insert(key(button).to_owned(), (rect.x1 - rect.x0).round());
++        }
++        let doc = serde_json::json!({
++            "button_size": (self.buttons[0].1.x1 - self.buttons[0].1.x0).round(),
++            "buttons_size": sides,
++            "stick_size": self.pad.round(),
++            "knob_size": self.knob.round(),
++            "stick": [sx, sy],
++            "hotbar": [hx, hy],
++            "look_from": self.look.x0 / self.width,
++            "buttons": places,
++            "debug": self.debug,
++            "edit": self.edit,
++        });
++        serde_json::to_string_pretty(&doc).unwrap_or_default()
++    }
++    
++    pub fn on_stick(&self, x: f32, y: f32) -> bool {
++        x < self.look.x0 && y > self.height * 0.35
++    }
++    
++    pub fn hotbar_slot(&self, x: f32, y: f32) -> Option<usize> {
++        if !self.hotbar.contains(x, y) {
++            return None;
++        }
++        let slot = ((x - self.hotbar.x0) / (HOTBAR_WIDTH / 9.0)) as i32;
++        Some(slot.clamp(0, 8) as usize)
++    }
++}
++
++#[derive(Clone, Copy, Debug, PartialEq, Eq)]
++pub enum Handle {
++    Stick,
++    Button(Button),
++    Hotbar,
++}
++
++fn sprite(button: Button, down: bool) -> &'static str {
++    match (button, down) {
++        (Button::Jump, false) => "horizon/touch/jump",
++        (Button::Jump, true) => "horizon/touch/jump_active",
++        (Button::Sneak, false) => "horizon/touch/sneak",
++        (Button::Sneak, true) => "horizon/touch/sneak_active",
++        (Button::Attack, false) => "horizon/touch/attack",
++        (Button::Attack, true) => "horizon/touch/attack_active",
++        (Button::Place, false) => "horizon/touch/use",
++        (Button::Place, true) => "horizon/touch/use_active",
++        (Button::Inventory, false) => "horizon/touch/inventory",
++        (Button::Inventory, true) => "horizon/touch/inventory_active",
++        (Button::Chat, false) => "horizon/touch/chat",
++        (Button::Chat, true) => "horizon/touch/chat_active",
++        (Button::Pause, false) => "horizon/touch/pause",
++        (Button::Pause, true) => "horizon/touch/pause_active",
++    }
++}
++
++fn blit(draws: &mut Vec<hud_layout::GuiDraw>, sprite: &'static str, x: f32, y: f32, w: f32, h: f32) {
++    draws.push(hud_layout::GuiDraw::Sprite {
++        sprite: std::borrow::Cow::Borrowed(sprite),
++        x: x.round() as i32,
++        y: y.round() as i32,
++        w: w.round() as i32,
++        h: h.round() as i32,
++        region: None,
++        color: 0xFFFF_FFFF,
++        blend: hud_layout::Blend::Textured,
++    });
++}
++
++fn outline(draws: &mut Vec<hud_layout::GuiDraw>, rect: Rect, color: u32) {
++    let (x0, y0) = (rect.x0.round() as i32, rect.y0.round() as i32);
++    let (x1, y1) = (rect.x1.round() as i32, rect.y1.round() as i32);
++    let mut part = |a: [i32; 4]| {
++        draws.push(hud_layout::fill(a[0], a[1], a[2], a[3], color));
++    };
++    part([x0, y0, x1, y0 + 1]);
++    part([x0, y1 - 1, x1, y1]);
++    part([x0, y0, x0 + 1, y1]);
++    part([x1 - 1, y0, x1, y1]);
++}
++
++fn ruler(draws: &mut Vec<hud_layout::GuiDraw>, layout: &Layout) {
++    let (w, h) = (layout.width, layout.height);
++    let (wi, hi) = (w.round() as i32, h.round() as i32);
++    for step in 1..10 {
++        let share = step as f32 * 0.1;
++        
++        let faint = step % 5 == 0 || step == 1 || step == 9;
++        let color = if faint { 0x80_FF_FF_FF } else { 0x38_FF_FF_FF };
++        let x = (w * share).round() as i32;
++        draws.push(hud_layout::fill(x, 0, x + 1, hi, color));
++        let y = (h * share).round() as i32;
++        draws.push(hud_layout::fill(0, y, wi, y + 1, color));
++    }
++    if let Some((x, y)) = layout.touch {
++        
++        let arm = 11.0;
++        let (x, y) = (x.round() as i32, y.round() as i32);
++        let color = 0xC0_FF_50_50;
++        draws.push(hud_layout::fill(x - arm as i32, y, x + arm as i32, y + 1, color));
++        draws.push(hud_layout::fill(x, y - arm as i32, x + 1, y + arm as i32, color));
++    }
++}
++
++pub fn paint(
++    batch: &mut HudBatch,
++    atlas: &HudAtlas,
++    layout: &Layout,
++    knob: (f32, f32),
++    held: impl Fn(Button) -> bool,
++) {
++    let mut draws = Vec::new();
++    let mut absent = Vec::new();
++    let mut control = |draws: &mut Vec<hud_layout::GuiDraw>, sprite: &'static str, x: f32, y: f32, w: f32, h: f32| {
++        blit(draws, sprite, x, y, w, h);
++        if !atlas.sprites.contains_key(sprite) {
++            absent.push(sprite);
++            draws.push(hud_layout::fill(
++                x.round() as i32,
++                y.round() as i32,
++                (x + w).round() as i32,
++                (y + h).round() as i32,
++                0x90_1A_1A_20,
++            ));
++        }
++    };
++    if layout.debug {
++        ruler(&mut draws, layout);
++    }
++    if layout.edit {
++        
++        let edge = 0xC0_FF_D0_40;
++        for (_, rect) in &layout.buttons {
++            outline(&mut draws, *rect, edge);
++        }
++        let (sx, sy) = layout.stick;
++        let half = layout.pad * 0.5;
++        outline(
++            &mut draws,
++            Rect {
++                x0: sx - half,
++                y0: sy - half,
++                x1: sx + half,
++                y1: sy + half,
++            },
++            edge,
++        );
++        outline(&mut draws, layout.hotbar, edge);
++    }
++    let (sx, sy) = layout.stick;
++    control(
++        &mut draws,
++        "horizon/touch/pad",
++        sx - layout.pad * 0.5,
++        sy - layout.pad * 0.5,
++        layout.pad,
++        layout.pad,
++    );
++    control(
++        &mut draws,
++        "horizon/touch/stick",
++        knob.0 - layout.knob * 0.5,
++        knob.1 - layout.knob * 0.5,
++        layout.knob,
++        layout.knob,
++    );
++    for (button, rect) in &layout.buttons {
++        let down = held(*button);
++        let side = rect.x1 - rect.x0;
++        let sprite = sprite(*button, down);
++        control(&mut draws, sprite, rect.x0, rect.y0, side, side);
++    }
++    static REPORTED: std::sync::Once = std::sync::Once::new();
++    REPORTED.call_once(|| {
++        log::info!(
++            "Horizon: touch sprites missing from the atlas: {} ({})",
++            absent.len(),
++            absent.join(", ")
++        );
++    });
++    hud_layout::paint(batch, atlas, &draws);
++}
 diff --git a/crates/horizon-client/Cargo.toml b/crates/horizon-client/Cargo.toml
 index 37d24c3061..dffdc03a43 100644
 --- a/crates/horizon-client/Cargo.toml
