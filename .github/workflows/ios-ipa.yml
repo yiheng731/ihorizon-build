@@ -18,49 +18,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ipa:
-    name: build ipa (macos-15)
-    runs-on: macos-15
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Rust + iOS target
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-ios
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: ios-shell
-
-      - name: xcodegen
-        run: brew install xcodegen
-
-      - name: Show toolchain
-        run: |
-          xcodebuild -version
-          rustc -V
-          xcodegen --version
-
-      - name: Build ipa
-        run: bash scripts/build_ipa.sh
-
-      - name: Inspect bundle
-        run: |
-          unzip -l build/Horizon-unsigned.ipa | head -40
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' \
-            build/Payload/Horizon.app/Info.plist
-          lipo -info build/Payload/Horizon.app/Horizon || true
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ihorizon-ipa
-          path: build/*.ipa
-          if-no-files-found: error
-          retention-days: 14
-
   client:
     name: build client ipa (macos-15)
     runs-on: macos-15
@@ -149,9 +106,20 @@ jobs:
         run: |
           set -o pipefail
           cargo build --release --target aarch64-apple-ios -p horizon-client-ios \
-            --features horizon-client/ios-touch 2>&1 | tail -40
+            --features horizon-client/ios-touch > ../cargo-ios.log 2>&1 || {
+              echo "::error::cargo build failed"
+              grep -n -m 40 -E "^error" ../cargo-ios.log || tail -60 ../cargo-ios.log
+              exit 1
+            }
           ls -l target/aarch64-apple-ios/release/libhorizon_client_ios.a
           ln -sfn "$PWD/target" "$GITHUB_WORKSPACE/target"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cargo-ios-log
+          path: cargo-ios.log
+          if-no-files-found: ignore
 
       - name: Xcode project
         run: |
@@ -164,8 +132,19 @@ jobs:
           xcodebuild -project Horizon.xcodeproj -scheme Horizon -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tail -60
+            build > xcode-ios.log 2>&1 || {
+              echo "::error::xcodebuild failed"
+              grep -n -m 40 -E "error:" xcode-ios.log || tail -60 xcode-ios.log
+              exit 1
+            }
           find build -maxdepth 6 -name '*.app' | head
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: xcode-ios-log
+          path: xcode-ios.log
+          if-no-files-found: ignore
 
       - name: Assemble the ipa
         run: |
@@ -183,7 +162,7 @@ jobs:
 
   sign:
     name: sign ipa (Ad Hoc)
-    needs: ipa
+    needs: client
     if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: macos-15
     timeout-minutes: 20
@@ -197,7 +176,7 @@ jobs:
 
       - uses: actions/download-artifact@v4
         with:
-          name: ihorizon-ipa
+          name: ihorizon-client-ipa
           path: build
 
       - name: Bail out when no signing material is configured
@@ -226,7 +205,7 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         run: |
           PROFILE_PATH="$HOME/Library/MobileDevice/Provisioning Profiles/horizon.mobileprovision"
-          bash scripts/resign_ipa.sh "build/Horizon-unsigned.ipa" "build/Horizon-signed.ipa" \
+          bash scripts/resign_ipa.sh "build/ihorizon-client-unsigned.ipa" "build/ihorizon-client-signed.ipa" \
             "$TEAM_ID" "$PROFILE_PATH"
 
       - uses: actions/upload-artifact@v4
