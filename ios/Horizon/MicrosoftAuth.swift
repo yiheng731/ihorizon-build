@@ -76,7 +76,7 @@ final class MicrosoftAuth {
         let device = try await requestDeviceCode()
         progress("在浏览器里打开 \(device.verification) 并输入 \(device.code)")
         if let url = URL(string: device.verification) {
-            UIApplication.shared.open(url)
+            await UIApplication.shared.open(url)
         }
         let token = try await pollForToken(device)
         progress("已拿到微软账号，正在验证 Xbox 档案")
