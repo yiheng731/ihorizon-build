@@ -443,7 +443,12 @@ def download_artifact(token: str, owner: str, name: str, run_id: int, dest_dir: 
                       artifact: str = ARTIFACT, required: bool = True) -> Path | None:
     step("下载 ipa")
     artifacts = api("GET", f"/repos/{owner}/{name}/actions/runs/{run_id}/artifacts", token)
-    target = next((a for a in artifacts.get("artifacts", []) if a["name"] == artifact), None)
+    pool = artifacts.get("artifacts", [])
+    target = next((a for a in pool if a["name"] == artifact), None)
+    if target is None and artifact == ARTIFACT:
+        target = next((a for a in pool if a["name"] == CLIENT_ARTIFACT), None)
+        if target is not None:
+            artifact = CLIENT_ARTIFACT
     if not target:
         if not required:
             log(f"    （这次没有 {artifact} 产物，跳过）")
