@@ -28,6 +28,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Swift type check first
+        run: |
+          set -o pipefail
+          SDK=$(xcrun --sdk iphoneos --show-sdk-path)
+          xcrun --sdk iphoneos swiftc -typecheck -target arm64-apple-ios15.0 -sdk "$SDK"             ios/Horizon/main.swift ios/Horizon/Launcher.swift ios/Horizon/MicrosoftAuth.swift             > swift.log 2>&1 || {
+              echo "::error::swift type check failed"
+              grep -n -m 40 "error:" swift.log || tail -40 swift.log
+              exit 1
+            }
+          echo "swift: the launcher type checks"
+
       - name: Rust + iOS target
         uses: dtolnay/rust-toolchain@stable
         with:
