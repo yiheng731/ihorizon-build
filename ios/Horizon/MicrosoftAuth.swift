@@ -71,11 +71,12 @@ final class MicrosoftAuth {
         writeSessionFile(nil)
     }
 
-    static func signIn(progress: @escaping @MainActor (String) -> Void) async throws -> Account {
+    @MainActor
+    static func signIn(progress: @MainActor @escaping (String) -> Void) async throws -> Account {
         let device = try await requestDeviceCode()
         progress("在浏览器里打开 \(device.verification) 并输入 \(device.code)")
-        await MainActor.run {
-            UIApplication.shared.open(URL(string: device.verification)!)
+        if let url = URL(string: device.verification) {
+            UIApplication.shared.open(url)
         }
         let token = try await pollForToken(device)
         progress("已拿到微软账号，正在验证 Xbox 档案")
