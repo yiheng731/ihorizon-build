@@ -96,17 +96,21 @@ final class MicrosoftAuth {
 
     private static func requestDeviceCode() async throws -> Device {
         var request = URLRequest(
-            url: URL(string: "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode")!)
+            url: URL(string: "https://login.live.com/oauth20_connect.srf")!)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         let encoded = scopes.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? scopes
-        let body = "client_id=\(clientID)&scope=\(encoded)&prompt=select_account"
+        let body = "client_id=\(clientID)&scope=\(encoded)&response_type=device_code"
         request.httpBody = body.data(using: .utf8)
         let json = try await send(request)
         guard let code = json["user_code"] as? String,
               let deviceCode = json["device_code"] as? String,
-              let verification = json["verification_uri"] as? String
-        else { throw AuthError.http(-1, "设备码响应缺少字段") }
+              let verification = (json["verification_uri"] as? String)
+                ?? (json["verification_url"] as? String)
+        else {
+            let detail = (json["error_description"] as? String) ?? "\(json)"
+            throw AuthError.http(-1, "设备码响应缺少字段：\(detail.prefix(200))")
+        }
         let interval = (json["interval"] as? Double) ?? 5
         let expires = (json["expires_in"] as? Double) ?? 900
         return Device(
@@ -122,7 +126,7 @@ final class MicrosoftAuth {
         while Date() < device.expires {
             try await Task.sleep(nanoseconds: UInt64(device.interval * 1_000_000_000))
             var request = URLRequest(
-                url: URL(string: "https://login.microsoftonline.com/consumers/oauth2/v2.0/token")!)
+                url: URL(string: "https://login.live.com/oauth20_token.srf")!)
             request.httpMethod = "POST"
             request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
             let body = [
